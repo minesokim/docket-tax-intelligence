@@ -1,0 +1,31 @@
+{
+  "name": "docket",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.28.1",
+  "engines": {
+    "node": ">=20.20.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --if-present dev",
+    "dev:web": "pnpm --filter @docket/web dev",
+    "dev:api": "pnpm --filter @docket/api dev",
+    "dev:worker": "pnpm --filter @docket/worker dev",
+    "setup:claude": "node scripts/open-claude-code-auth.mjs",
+    "build": "pnpm --filter @docket/web build && pnpm --filter @docket/api typecheck && pnpm --filter @docket/worker typecheck",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "validate": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "next": "^16.1.6",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  }
+}

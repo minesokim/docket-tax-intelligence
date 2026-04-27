@@ -1,0 +1,61 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "declaration": false,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "baseUrl": ".",
+    "paths": {
+      "@docket/contracts": [
+        "packages/contracts/src/index.ts"
+      ],
+      "@docket/domain": [
+        "packages/domain/src/index.ts"
+      ],
+      "@docket/config": [
+        "packages/config/src/index.ts"
+      ],
+      "@docket/auth": [
+        "packages/auth/src/index.ts"
+      ],
+      "@docket/db": [
+        "packages/db/src/index.ts"
+      ],
+      "@docket/observability": [
+        "packages/observability/src/index.ts"
+      ],
+      "@docket/search": [
+        "packages/search/src/index.ts"
+      ],
+      "@docket/ui": [
+        "packages/ui/src/index.ts"
+      ],
+      "@docket/editor": [
+        "packages/editor/src/index.ts"
+      ],
+      "@docket/ai": [
+        "packages/ai/src/index.ts"
+      ],
+      "@docket/integrations": [
+        "packages/integrations/src/index.ts"
+      ],
+      "@docket/jobs": [
+        "packages/jobs/src/index.ts"
+      ],
+      "@docket/test-utils": [
+        "packages/test-utils/src/index.ts"
+      ]
+    }
+  }
+}

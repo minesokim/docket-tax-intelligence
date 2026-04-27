@@ -1,0 +1,44 @@
+import type { AuthorityResearchResult } from "@docket/tax-knowledge";
+
+export type ChatHistoryTurn = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type SourceIndexEntry = {
+  type: string;
+  label: string;
+  detail: string;
+};
+
+export type ChatAnswer = {
+  mode: "client-return" | "general-research";
+  headline: string;
+  answer: string[];
+  reasoningSummary: string[];
+  nextSteps: string[];
+  sourceIds: string[];
+  citationIds: string[];
+  suggestedFollowups: string[];
+  retrievedAuthority?: AuthorityResearchResult;
+  synthesizedBy?: "claude-code-cli";
+  limitation?: string;
+};
+
+export type TaxChatResponse = {
+  answer: ChatAnswer;
+  sourceIndex: Record<string, SourceIndexEntry>;
+  contextLabel: string | null;
+  contextReturnId: string | null;
+};
+
+export const suggestedQuestions = [
+  "What are the requirements for an S corporation election?",
+  "What records are needed to substantiate business mileage?",
+  "How should a preparer evaluate a home office deduction?",
+  "When should a firm recommend filing an extension?",
+  "What is the difference between a client claim and a verified tax fact?",
+  "What sources are stronger than IRS publications?",
+  "How should unsupported tax positions be escalated?",
+  "What should a reviewer check before ready-to-file?",
+];
