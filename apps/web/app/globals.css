@@ -434,6 +434,29 @@ main {
   font-size: 12px;
 }
 
+.source-rank-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.source-rank-row {
+  display: grid;
+  gap: 3px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.source-rank-row strong {
+  font-size: 14px;
+}
+
+.source-rank-row span {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: lowercase;
+}
+
 .answer {
   color: var(--ink) !important;
 }

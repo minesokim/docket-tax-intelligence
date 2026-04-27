@@ -37,6 +37,22 @@ The API exposes this control plane through:
 - `GET /api/jobs`
 - `GET /api/jobs/:id`
 
+## Tax Knowledge Source Hierarchy
+
+`@docket/tax-knowledge` owns the ranked source registry that determines which sources can support trusted tax conclusions and which sources are only risk or community signals.
+
+The registry is intentionally not one flat vector soup. Docket separates sources into graph layers:
+
+- `TAX_AUTHORITY_GRAPH`: statute, regulations, Federal Register, IRB, IRS forms/instructions/publications, case law, written determinations, and state authorities.
+- `FILING_LOGIC_GRAPH`: IRS Direct File/OpenFile logic and IRS MeF schemas/business rules. These can block workflow readiness but do not independently establish substantive tax treatment.
+- `PREPARER_RISK_GRAPH`: Circular 230, OPR discipline, IRS e-News, DOJ Tax, IRS CI, TIGTA, and enforcement patterns. This powers professional-control gates and preparer-risk flags.
+- `PRACTITIONER_INTERPRETATION_LAYER`: licensed and curated practitioner analysis such as Checkpoint, Bloomberg Tax, CCH, TheTaxBook, Parker, Spidell, NATP, and NAEA.
+- `COMMUNITY_SIGNAL_LAYER`: TaxProTalk, r/taxpros, NAEA WebBoard, software forums, CSEA/community lists, and open social channels.
+
+Only sources marked `canSupportTrustedTaxConclusion` may support a trusted tax answer, and even those must match tax year, jurisdiction, effective date, freshness, and review status. Forums, newsletters, enforcement releases, and social sources never write directly into the authority graph. They create candidate research tasks and risk signals that require official-source backing and human review.
+
+The Antonio/OPR "name-and-shame" source lives in the `PREPARER_RISK_GRAPH` as IRS OPR Disciplinary Actions. It is high-value for compliance and model-risk controls, but it is not substantive tax-law authority.
+
 ## Persistence
 
 `infra/migrations/0001_initial.sql` defines the PostgreSQL-compatible schema for firms, users, clients, engagements, returns, documents, evidence, tax facts, claims, conversations, issues, opportunities, knowledge, AI runs, consent, audit, policies, signatures, exports, and post-filing events.
