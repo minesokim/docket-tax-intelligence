@@ -2,6 +2,7 @@ import type {
   Client,
   ClientClarification,
   ClientContact,
+  ConsentRecord,
   DeductionOpportunity,
   DocketData,
   Engagement,
@@ -207,6 +208,7 @@ const additionalClientProfiles: ClientSeedProfile[] = [
     documents: [
       { id: "w2", fileName: "Nimbus_W2_2024.pdf", documentClass: "W2", processed: true },
       { id: "1099div", fileName: "Fidelity_1099_DIV_2024.pdf", documentClass: "FORM_1099_DIV", processed: true },
+      { id: "rsu-supplement", fileName: "Nimbus_RSU_Supplement_2024.pdf", documentClass: "CLIENT_ORGANIZER", processed: true },
     ],
     missingDocuments: [],
     issues: [],
@@ -233,17 +235,26 @@ const additionalClientProfiles: ClientSeedProfile[] = [
     documents: [
       { id: "1099nec", fileName: "Atlas_1099_NEC_2024.pdf", documentClass: "FORM_1099_NEC", processed: true },
       { id: "expenses", fileName: "Consulting_Expenses_2024.xlsx", documentClass: "BUSINESS_EXPENSE_SUMMARY", processed: true },
+      { id: "1095a", fileName: "Covered_CA_1095_A_2024.pdf", documentClass: "FORM_1095_A", processed: true },
     ],
-    missingDocuments: [{ id: "1095a", expectedDocumentClass: "FORM_1095_A", reason: "Client mentioned marketplace coverage in organizer.", severity: "RED" }],
+    missingDocuments: [
+      {
+        id: "1095a",
+        expectedDocumentClass: "FORM_1095_A",
+        reason: "Client mentioned marketplace coverage in organizer; uploaded 1095-A still requires ACA reconciliation.",
+        severity: "RED",
+        status: "RECEIVED",
+      },
+    ],
     issues: [
       {
         id: "marketplace-1095a",
         issueType: "MISSING_1095_A",
-        title: "Marketplace coverage mentioned with no 1095-A",
-        description: "Organizer says Priya had marketplace insurance for part of 2024, but no Form 1095-A is uploaded.",
+        title: "Marketplace 1095-A needs ACA reconciliation",
+        description: "Organizer says Priya had marketplace insurance for part of 2024. Form 1095-A is uploaded, but premiums, SLCSP, and APTC must be reconciled before finalizing ACA-related return items.",
         riskLevel: "RED",
         blocker: true,
-        recommendedAction: "Request Form 1095-A before finalizing ACA-related return items.",
+        recommendedAction: "Review Form 1095-A monthly coverage, premiums, SLCSP, and APTC before finalizing ACA-related return items.",
       },
     ],
     flags: [{ id: "aca-blocker", riskLevel: "RED", label: "1095-A blocker", reason: "Marketplace insurance signal requires source document." }],
@@ -266,17 +277,20 @@ const additionalClientProfiles: ClientSeedProfile[] = [
     engagementName: "2024 1040 + Rental",
     scopes: ["1040", "EXTENSION"],
     household: [{ name: "Ben Larson", relationship: "TAXPAYER" }],
-    documents: [{ id: "1098", fileName: "Rental_Mortgage_1098_2024.pdf", documentClass: "FORM_1098", processed: true }],
-    missingDocuments: [{ id: "k1", expectedDocumentClass: "UNKNOWN", reason: "Prior-year partnership K-1 pattern has not been resolved.", severity: "RED" }],
+    documents: [
+      { id: "1098", fileName: "Rental_Mortgage_1098_2024.pdf", documentClass: "FORM_1098", processed: true },
+      { id: "k1", fileName: "Redwood_Storage_Partners_K1_2024.pdf", documentClass: "SCHEDULE_K1", processed: true },
+    ],
+    missingDocuments: [{ id: "k1", expectedDocumentClass: "SCHEDULE_K1", reason: "Prior-year partnership K-1 pattern is received but still requires reviewer treatment for basis/passive limits.", severity: "RED", status: "RECEIVED" }],
     issues: [
       {
         id: "prior-k1-missing",
         issueType: "MISSING_K1",
-        title: "Prior-year K-1 expected but missing",
-        description: "Prior-year return included a partnership K-1; no current-year K-1 or waiver is in the file.",
+        title: "Current-year K-1 needs Schedule E reviewer analysis",
+        description: "Prior-year return included a partnership K-1 and the current-year K-1 is uploaded, but basis/passive limitation analysis is not automated in the foundation release.",
         riskLevel: "RED",
         blocker: true,
-        recommendedAction: "Ask whether the partnership interest still exists and request the current-year K-1.",
+        recommendedAction: "Route K-1 and Schedule E treatment to reviewer; do not automate basis/passive limitation conclusions.",
       },
     ],
     flags: [{ id: "k1-extension", riskLevel: "RED", label: "Likely extension", reason: "K-1 expected and deadline risk is high." }],
@@ -341,17 +355,18 @@ const additionalClientProfiles: ClientSeedProfile[] = [
     documents: [
       { id: "w2", fileName: "Brightside_W2_2024.pdf", documentClass: "W2", processed: true },
       { id: "organizer", fileName: "Client_Organizer_2024.pdf", documentClass: "CLIENT_ORGANIZER", processed: true },
+      { id: "1098t", fileName: "Cascadia_State_1098_T_2024.pdf", documentClass: "FORM_1098_T", processed: true },
     ],
-    missingDocuments: [{ id: "1098t", expectedDocumentClass: "UNKNOWN", reason: "Education credit may apply; Form 1098-T not uploaded.", severity: "YELLOW" }],
+    missingDocuments: [{ id: "1098t", expectedDocumentClass: "FORM_1098_T", reason: "Education credit may apply; Form 1098-T is received but needs qualified-expense review.", severity: "YELLOW", status: "RECEIVED" }],
     issues: [
       {
         id: "education-credit-support",
         issueType: "EDUCATION_CREDIT_SUPPORT",
         title: "Education credit facts need support",
-        description: "Dependent is marked as a full-time student, but tuition support is not yet in the file.",
+        description: "Dependent is marked as a full-time student and Form 1098-T is uploaded, but qualified expenses and scholarship offsets still need review.",
         riskLevel: "YELLOW",
         blocker: false,
-        recommendedAction: "Request 1098-T or tuition account statement before evaluating education credit.",
+        recommendedAction: "Review 1098-T, scholarships, and qualified expenses before evaluating education credit.",
       },
     ],
     flags: [{ id: "education-doc", riskLevel: "YELLOW", label: "Education support missing", reason: "Student dependent context creates possible credit support request." }],
@@ -375,7 +390,7 @@ const additionalClientProfiles: ClientSeedProfile[] = [
     scopes: ["1040"],
     household: [{ name: "Nora Williams", relationship: "TAXPAYER" }],
     documents: [
-      { id: "1099r", fileName: "Vanguard_1099_R_2024.pdf", documentClass: "UNKNOWN", processed: true },
+      { id: "1099r", fileName: "Vanguard_1099_R_2024.pdf", documentClass: "FORM_1099_R", processed: true },
       { id: "1099int", fileName: "Ally_1099_INT_2024.pdf", documentClass: "FORM_1099_INT", processed: true },
     ],
     missingDocuments: [],
@@ -400,17 +415,20 @@ const additionalClientProfiles: ClientSeedProfile[] = [
     engagementName: "2024 Individual 1040",
     scopes: ["1040", "EXTENSION"],
     household: [{ name: "Omar Haddad", relationship: "TAXPAYER" }],
-    documents: [{ id: "w2", fileName: "Metro_W2_2024.pdf", documentClass: "W2", processed: true }],
-    missingDocuments: [{ id: "crypto", expectedDocumentClass: "UNKNOWN", reason: "Client mentioned crypto sales; tax-lot support is not uploaded.", severity: "RED" }],
+    documents: [
+      { id: "w2", fileName: "Metro_W2_2024.pdf", documentClass: "W2", processed: true },
+      { id: "crypto", fileName: "Coinbase_Tax_Lot_Report_2024.csv", documentClass: "CRYPTO_TAX_LOT_REPORT", processed: true },
+    ],
+    missingDocuments: [{ id: "crypto", expectedDocumentClass: "CRYPTO_TAX_LOT_REPORT", reason: "Client mentioned crypto sales; tax-lot report is uploaded but has missing basis lots.", severity: "RED", status: "RECEIVED" }],
     issues: [
       {
         id: "crypto-unsupported",
         issueType: "UNSUPPORTED_CRYPTO_TAX_LOTS",
         title: "Crypto tax-lot accounting is out of scope",
-        description: "Client mentioned crypto disposals but no exchange export or tax-lot report is attached.",
+        description: "Client mentioned crypto disposals and a Coinbase tax-lot report is attached, but it has missing basis lots and crypto tax-lot accounting remains out of scope.",
         riskLevel: "RED",
         blocker: true,
-        recommendedAction: "Escalate unsupported crypto accounting and request exchange/tax-lot reports.",
+        recommendedAction: "Escalate unsupported crypto accounting, review missing basis lots, and request exchange exports or advisor-prepared tax-lot support.",
       },
     ],
     flags: [{ id: "unsupported-crypto", riskLevel: "RED", label: "Unsupported scope", reason: "Crypto tax-lot accounting is not automated in foundation release." }],
@@ -433,7 +451,10 @@ const additionalClientProfiles: ClientSeedProfile[] = [
     engagementName: "2024 1040 + Multi-state",
     scopes: ["1040", "MULTI_STATE_ISSUE_DETECTION"],
     household: [{ name: "Hannah Kim", relationship: "TAXPAYER" }],
-    documents: [{ id: "w2", fileName: "Juniper_W2_2024.pdf", documentClass: "W2", processed: true }],
+    documents: [
+      { id: "w2", fileName: "Juniper_W2_2024.pdf", documentClass: "W2", processed: true },
+      { id: "state-allocation", fileName: "CA_OR_Workday_Allocation_2024.xlsx", documentClass: "STATE_ALLOCATION_WORKPAPER", processed: true },
+    ],
     missingDocuments: [],
     issues: [
       {
@@ -469,17 +490,20 @@ const additionalClientProfiles: ClientSeedProfile[] = [
       { name: "Lucas Peterson", relationship: "TAXPAYER" },
       { name: "Maya Peterson", relationship: "DEPENDENT" },
     ],
-    documents: [{ id: "w2", fileName: "Northstar_W2_2024.pdf", documentClass: "W2", processed: true }],
-    missingDocuments: [{ id: "childcare", expectedDocumentClass: "UNKNOWN", reason: "Dependent care expenses mentioned without provider EIN/support.", severity: "YELLOW" }],
+    documents: [
+      { id: "w2", fileName: "Northstar_W2_2024.pdf", documentClass: "W2", processed: true },
+      { id: "dependent-care", fileName: "Tiny_Oaks_Dependent_Care_Statement_2024.pdf", documentClass: "DEPENDENT_CARE_STATEMENT", processed: true },
+    ],
+    missingDocuments: [{ id: "childcare", expectedDocumentClass: "DEPENDENT_CARE_STATEMENT", reason: "Dependent care support is uploaded and needs provider/EIN review.", severity: "YELLOW", status: "RECEIVED" }],
     issues: [
       {
         id: "dependent-care-support",
         issueType: "DEPENDENT_CARE_SUPPORT",
         title: "Dependent care provider facts missing",
-        description: "Client organizer mentions childcare, but provider name, EIN, and amount support are missing.",
+        description: "Client organizer mentions childcare and a provider statement is uploaded, but provider EIN, work-related care purpose, and payment support need reviewer verification.",
         riskLevel: "YELLOW",
         blocker: false,
-        recommendedAction: "Request provider details and payment support before evaluating dependent care credit.",
+        recommendedAction: "Review provider statement, EIN, amount paid, and work-related care support before evaluating dependent care credit.",
       },
     ],
     flags: [{ id: "childcare-support", riskLevel: "YELLOW", label: "Dependent care support", reason: "Credit opportunity needs provider facts." }],
@@ -574,16 +598,19 @@ const additionalSourceDocuments: SourceDocument[] = additionalClientProfiles.fla
 );
 
 const additionalMissingDocuments: MissingDocument[] = additionalClientProfiles.flatMap((profile) =>
-  profile.missingDocuments.map((document) => ({
-    id: `missing-${profile.slug}-${document.id}`,
-    clientId: `client-${profile.slug}`,
-    taxReturnId: `return-${profile.slug}-2024`,
-    expectedDocumentClass: document.expectedDocumentClass,
-    reason: document.reason,
-    sourceIds: [],
-    severity: document.severity,
-    status: document.status ?? "MISSING",
-  })),
+  profile.missingDocuments.map((document) => {
+    const matchingDocument = profile.documents.find((sourceDocument) => sourceDocument.id === document.id || sourceDocument.documentClass === document.expectedDocumentClass);
+    return {
+      id: `missing-${profile.slug}-${document.id}`,
+      clientId: `client-${profile.slug}`,
+      taxReturnId: `return-${profile.slug}-2024`,
+      expectedDocumentClass: document.expectedDocumentClass,
+      reason: document.reason,
+      sourceIds: matchingDocument ? [`doc-${profile.slug}-${matchingDocument.id}`] : [],
+      severity: document.severity,
+      status: document.status ?? "MISSING",
+    };
+  }),
 );
 
 const additionalTaxIssues: TaxIssue[] = additionalClientProfiles.flatMap((profile) =>
@@ -598,7 +625,10 @@ const additionalTaxIssues: TaxIssue[] = additionalClientProfiles.flatMap((profil
     riskLevel: issue.riskLevel,
     status: issue.status ?? "OPEN",
     blocker: issue.blocker,
-    sourceIds: [],
+    sourceIds: [
+      ...profile.documents.map((document) => `doc-${profile.slug}-${document.id}`),
+      ...profile.missingDocuments.map((document) => `missing-${profile.slug}-${document.id}`),
+    ],
     recommendedAction: issue.recommendedAction,
     assignedToRole: issue.blocker ? "MANAGER_REVIEWER" : "PREPARER",
     createdAt: NOW,
@@ -645,7 +675,7 @@ const additionalDeductionOpportunities: DeductionOpportunity[] = additionalClien
       whyDetected: "Client organizer mentions childcare and dependent household facts.",
       sourceIds: [],
       missingFacts: ["Provider name", "Provider EIN", "Amount paid", "Care purpose/work connection"],
-      missingDocuments: ["UNKNOWN"],
+      missingDocuments: ["DEPENDENT_CARE_STATEMENT"],
       riskLevel: "YELLOW",
       status: "NEEDS_FACTS",
       clientQuestion: "Please provide dependent care provider details, EIN, amount paid, and payment support.",
@@ -662,7 +692,7 @@ const additionalDeductionOpportunities: DeductionOpportunity[] = additionalClien
       whyDetected: "Full-time student dependent appears in household facts.",
       sourceIds: [],
       missingFacts: ["Qualified expenses", "Enrollment status", "Scholarships/grants"],
-      missingDocuments: ["UNKNOWN"],
+      missingDocuments: ["FORM_1098_T"],
       riskLevel: "YELLOW",
       status: "NEEDS_DOCUMENTS",
       clientQuestion: "Please upload Form 1098-T or school account statement for the student dependent.",
@@ -679,7 +709,7 @@ const additionalDeductionOpportunities: DeductionOpportunity[] = additionalClien
       whyDetected: "Client mentioned crypto disposals without exchange exports or tax-lot detail.",
       sourceIds: [],
       missingFacts: ["Exchange list", "Tax-lot report", "Acquisition dates", "Disposition proceeds"],
-      missingDocuments: ["UNKNOWN"],
+      missingDocuments: ["CRYPTO_TAX_LOT_REPORT"],
       riskLevel: "RED",
       status: "NEEDS_DOCUMENTS",
       clientQuestion: "Please upload exchange exports or a tax-lot report before the firm evaluates crypto sales.",
@@ -688,6 +718,24 @@ const additionalDeductionOpportunities: DeductionOpportunity[] = additionalClien
   }
   return opportunities;
 });
+
+const additionalConsentRecords: ConsentRecord[] = additionalClientProfiles.map((profile) => ({
+  id: `consent-${profile.slug}-ai-tax-prep`,
+  firmId: IDS.firm,
+  clientId: `client-${profile.slug}`,
+  taxReturnId: `return-${profile.slug}-2024`,
+  consentType: "AI_ASSISTED_TAX_PREP",
+  scope: "Use Docket mock AI workflows to classify uploaded source documents, extract tax facts, detect issues, and draft reviewer-controlled workpapers.",
+  consentTextVersion: "ai-tax-prep-v1",
+  granted: true,
+  grantedAt: "2026-02-18T15:30:00.000Z",
+  revokedAt: null,
+  signedBy: profile.displayName,
+  ipAddress: "127.0.0.1",
+  userAgent: "Seed fixture",
+  relatedDocumentId: null,
+  createdAt: "2026-02-18T15:30:00.000Z",
+}));
 
 export const docketSeedData: DocketData = {
   firms: [
@@ -1687,6 +1735,42 @@ export const docketSeedData: DocketData = {
       effectiveDate: "2024-01-01",
       nonprecedential: false,
     },
+    {
+      id: "auth-irs-pub-503",
+      jurisdiction: "US",
+      title: "Publication 503 - Child and Dependent Care Expenses",
+      authorityLevel: "IRS_PUBLICATION",
+      sourceUrl: "https://www.irs.gov/forms-pubs/about-publication-503",
+      topicTags: ["dependent-care", "childcare", "provider-ein", "work-related-care", "credit"],
+      retrievedAt: "2026-04-26T09:00:00.000Z",
+      publishedAt: "2026-02-20T00:00:00.000Z",
+      effectiveDate: "2024-01-01",
+      nonprecedential: false,
+    },
+    {
+      id: "auth-irs-pub-936",
+      jurisdiction: "US",
+      title: "Publication 936 - Home Mortgage Interest Deduction",
+      authorityLevel: "IRS_PUBLICATION",
+      sourceUrl: "https://www.irs.gov/forms-pubs/about-publication-936",
+      topicTags: ["1098", "mortgage-interest", "real-estate-tax", "rental-property"],
+      retrievedAt: "2026-04-26T09:00:00.000Z",
+      publishedAt: "2026-01-25T00:00:00.000Z",
+      effectiveDate: "2024-01-01",
+      nonprecedential: false,
+    },
+    {
+      id: "auth-irs-pub-575",
+      jurisdiction: "US",
+      title: "Publication 575 - Pension and Annuity Income",
+      authorityLevel: "IRS_PUBLICATION",
+      sourceUrl: "https://www.irs.gov/forms-pubs/about-publication-575",
+      topicTags: ["1099-r", "retirement-income", "pension", "annuity", "distribution-code"],
+      retrievedAt: "2026-04-26T09:00:00.000Z",
+      publishedAt: "2026-02-10T00:00:00.000Z",
+      effectiveDate: "2024-01-01",
+      nonprecedential: false,
+    },
   ],
   taxAuthorityVersions: [
     { id: "authv-schedule-c-2024-a", sourceId: "auth-schedule-c-instructions", contentHash: "hash-schedule-c-2024-a", supersedesVersionId: null, createdAt: NOW },
@@ -1698,6 +1782,9 @@ export const docketSeedData: DocketData = {
     { id: "authv-pub550-2024-a", sourceId: "auth-irs-pub-550", contentHash: "hash-pub550-2024-a", supersedesVersionId: null, createdAt: NOW },
     { id: "authv-digital-assets-2024-a", sourceId: "auth-irs-digital-assets", contentHash: "hash-digital-assets-2024-a", supersedesVersionId: null, createdAt: NOW },
     { id: "authv-pub17-2024-a", sourceId: "auth-irs-pub-17", contentHash: "hash-pub17-2024-a", supersedesVersionId: null, createdAt: NOW },
+    { id: "authv-pub503-2024-a", sourceId: "auth-irs-pub-503", contentHash: "hash-pub503-2024-a", supersedesVersionId: null, createdAt: NOW },
+    { id: "authv-pub936-2024-a", sourceId: "auth-irs-pub-936", contentHash: "hash-pub936-2024-a", supersedesVersionId: null, createdAt: NOW },
+    { id: "authv-pub575-2024-a", sourceId: "auth-irs-pub-575", contentHash: "hash-pub575-2024-a", supersedesVersionId: null, createdAt: NOW },
   ],
   taxCitations: [
     {
@@ -1763,6 +1850,27 @@ export const docketSeedData: DocketData = {
       quote: "Individual return income review should reconcile retirement distribution source documents such as Form 1099-R before clearance.",
       authorityLevel: "IRS_PUBLICATION",
     },
+    {
+      id: "cite-pub503-dependent-care",
+      sourceId: "auth-irs-pub-503",
+      label: "Dependent care provider support",
+      quote: "Dependent care credit review needs provider identifying information, amount paid, and work-related care support before acceptance.",
+      authorityLevel: "IRS_PUBLICATION",
+    },
+    {
+      id: "cite-pub936-mortgage-interest",
+      sourceId: "auth-irs-pub-936",
+      label: "Mortgage interest source support",
+      quote: "Mortgage interest deduction review should reconcile Form 1098 and property-use facts before the position is accepted.",
+      authorityLevel: "IRS_PUBLICATION",
+    },
+    {
+      id: "cite-pub575-1099r",
+      sourceId: "auth-irs-pub-575",
+      label: "Form 1099-R retirement distribution support",
+      quote: "Retirement distribution treatment should be tied to Form 1099-R amounts, taxable amount, and distribution code support.",
+      authorityLevel: "IRS_PUBLICATION",
+    },
   ],
   taxSourceIngestionRuns: [
     {
@@ -1811,6 +1919,9 @@ export const docketSeedData: DocketData = {
         "authv-pub550-2024-a",
         "authv-digital-assets-2024-a",
         "authv-pub17-2024-a",
+        "authv-pub503-2024-a",
+        "authv-pub936-2024-a",
+        "authv-pub575-2024-a",
       ],
       lastSyncStatus: "CURRENT",
       lastSyncedAt: "2026-04-26T09:02:00.000Z",
@@ -2125,6 +2236,7 @@ export const docketSeedData: DocketData = {
       relatedDocumentId: null,
       createdAt: "2026-02-14T16:14:00.000Z",
     },
+    ...additionalConsentRecords,
   ],
   auditEvents: [
     {

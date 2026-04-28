@@ -1,0 +1,7 @@
+Form W-2 Wage and Tax Statement
+Tax year: 2024
+Employee: Omar Haddad
+Employer: Metro Logistics
+Employer EIN: 91-5508120
+Box 1 wages: $72,300.00
+Box 2 federal income tax withheld: $8,160.00

@@ -1,0 +1,9 @@
+Form W-2 Wage and Tax Statement
+Tax year: 2024
+Employee: Avery Chen
+Employer: Nimbus Robotics
+Employer EIN: 33-1004421
+Box 1 wages: $188,240.00
+Box 2 federal income tax withheld: $42,880.00
+Box 12 code V stock option income: $24,600.00
+Box 14 RSU withholding note: equity compensation included in wages

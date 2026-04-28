@@ -1,0 +1,9 @@
+Dependent care provider statement
+Tax year: 2024
+Taxpayer: Lucas Peterson
+Child: Maya Peterson
+Provider name: Tiny Oaks Learning Center
+Provider EIN: 94-0001188
+Amount paid: $6,400.00
+Care purpose: care provided while taxpayer worked
+Payment support: monthly statements attached

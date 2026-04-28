@@ -257,6 +257,45 @@ describe("Docket tax intelligence engines", () => {
     expect(uploaded.auditEvents.map((event) => event.eventType)).toContain("AI_EXTRACTION_RUN");
   });
 
+  it("extracts source-backed facts from the richer seeded document corpus across clients", () => {
+    let data = cloneDocketData();
+    data.documentExtractions = [];
+    data.extractedFields = [];
+    data.taxFacts = data.taxFacts.filter((fact) => !fact.id.startsWith("fact-doc-"));
+
+    const returnIds = [
+      "return-avery-chen-2024",
+      "return-priya-narayan-2024",
+      "return-ben-larson-2024",
+      "return-jordan-ellis-2024",
+      "return-sophia-martinez-2024",
+      "return-nora-williams-2024",
+      "return-omar-haddad-2024",
+      "return-hannah-kim-2024",
+      "return-lucas-peterson-2024",
+    ];
+
+    for (const returnId of returnIds) {
+      const result = runDocumentExtraction(data, returnId);
+      expect(result.blocked).toBe(false);
+      data = result.data;
+    }
+
+    const extractedFact = (sourceDocumentId: string, normalizedFactType: string) =>
+      data.extractedFields.find((field) => field.sourceDocumentId === sourceDocumentId && field.normalizedFactType === normalizedFactType);
+
+    expect(extractedFact("doc-avery-chen-1099div", "DIVIDEND_INCOME_ORDINARY")).toEqual(expect.objectContaining({ value: 8640.12 }));
+    expect(extractedFact("doc-priya-narayan-1095a", "MARKETPLACE_ANNUAL_APTC")).toEqual(expect.objectContaining({ value: 5460 }));
+    expect(extractedFact("doc-ben-larson-k1", "K1_ORDINARY_BUSINESS_INCOME")).toEqual(expect.objectContaining({ value: 18750 }));
+    expect(extractedFact("doc-jordan-ellis-1099b", "WASH_SALE_LOSS_DISALLOWED")).toEqual(expect.objectContaining({ value: 1240.2 }));
+    expect(extractedFact("doc-sophia-martinez-1098t", "EDUCATION_QUALIFIED_TUITION")).toEqual(expect.objectContaining({ value: 14800 }));
+    expect(extractedFact("doc-nora-williams-1099r", "RETIREMENT_GROSS_DISTRIBUTION")).toEqual(expect.objectContaining({ value: 28400 }));
+    expect(extractedFact("doc-omar-haddad-crypto", "CRYPTO_MISSING_BASIS_LOTS")).toEqual(expect.objectContaining({ value: 3 }));
+    expect(extractedFact("doc-hannah-kim-state-allocation", "STATE_CA_WORKDAYS_AFTER_MOVE")).toEqual(expect.objectContaining({ value: 18 }));
+    expect(extractedFact("doc-lucas-peterson-dependent-care", "DEPENDENT_CARE_AMOUNT_PAID")).toEqual(expect.objectContaining({ value: 6400 }));
+    expect(data.documentExtractions.filter((item) => item.provider === "mock_ocr" && item.status === "COMPLETE").length).toBeGreaterThanOrEqual(20);
+  });
+
   it("blocks workflows without required consent and checks permissions", () => {
     const data = cloneDocketData();
     expect(hasActiveConsent(data, IDS.client, "AI_ASSISTED_TAX_PREP", IDS.taxReturn)).toBe(true);

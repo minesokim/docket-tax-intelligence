@@ -1,0 +1,9 @@
+Client organizer
+Tax year: 2024
+Client: Sophia Martinez
+Dependent: Lena Martinez
+Student at least half-time: true
+Education expenses mentioned: true
+Tuition support uploaded: pending
+Childcare expenses: no
+Marketplace coverage: no

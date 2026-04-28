@@ -1,0 +1,9 @@
+Business expense summary
+Tax year: 2024
+Client: Priya Narayan
+Software subscriptions: $5,820.00
+Meals: $2,430.00
+Contractor payments: $18,750.00
+Travel: $7,910.00
+Home office expenses: none claimed
+Substantiation note: contractor W-9 files are incomplete for two vendors.

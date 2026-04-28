@@ -95,6 +95,12 @@ function localAuthorityPacketIds(sourcePacket: SourcePacketItem[], issueTitle: s
       if (/EDUCATION|1098.?T/i.test(issueType) || query.includes("education")) {
         if (haystack.includes("education") || haystack.includes("1098-t") || haystack.includes("tuition")) score += 4;
       }
+      if (/DEPENDENT|CHILD.?CARE/i.test(issueType) || query.includes("dependent care") || query.includes("childcare")) {
+        if (haystack.includes("dependent care") || haystack.includes("childcare") || haystack.includes("provider") || haystack.includes("503")) score += 4;
+      }
+      if (/1098|MORTGAGE|RENTAL/i.test(issueType) || query.includes("mortgage")) {
+        if (haystack.includes("1098") || haystack.includes("mortgage") || haystack.includes("936") || haystack.includes("rental")) score += 4;
+      }
       if (/1099.?R|RETIREMENT|PENSION|IRA/i.test(issueType) || query.includes("retirement")) {
         if (haystack.includes("1099-r") || haystack.includes("retirement") || haystack.includes("pension") || haystack.includes("ira")) score += 4;
       }
@@ -160,23 +166,32 @@ function issueSpecificSmellTests(issue: OrchestratorIssue, sourcePacket: SourceP
   const dollars = dollarsFromText(evidenceText);
   const tests: string[] = [];
 
-  if (/1099|income|gross|receipts/.test(issueText)) {
+  if (/1099-b|broker|stock|capital/.test(issueText)) {
+    tests.push("A stock-sale mention needs proceeds, basis, holding period, and wash-sale detail.");
+    tests.push("Prior-year brokerage activity makes a missing consolidated 1099 more plausible.");
+  } else if (/1095|marketplace|premium/.test(issueText)) {
+    tests.push("Reconcile annual premiums, SLCSP, and APTC against coverage months before clearing ACA items.");
+    tests.push("Part-year marketplace coverage can still be material even if employer coverage began later.");
+  } else if (/1099|income|gross|receipts/.test(issueText)) {
     const uniqueDollars = Array.from(new Set(dollars)).slice(0, 4);
     if (uniqueDollars.length >= 2) tests.push(`Compare reported amounts side by side: ${uniqueDollars.map((amount) => amount.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })).join(" vs ")}.`);
     tests.push("Check whether processor totals include payer forms before adding both to Schedule C gross receipts.");
     tests.push("Do not accept a client estimate as final gross receipts without a payer/payment-channel bridge.");
-  } else if (/1095|marketplace|premium/.test(issueText)) {
-    tests.push("Marketplace coverage without Form 1095-A can affect premium tax credit reconciliation.");
-    tests.push("Do not clear ACA-related return items from organizer text alone.");
-  } else if (/1099-b|broker|stock|capital/.test(issueText)) {
-    tests.push("A stock-sale mention needs proceeds, basis, holding period, and wash-sale detail.");
-    tests.push("Prior-year brokerage activity makes a missing consolidated 1099 more plausible.");
   } else if (/home.office|exclusive/.test(issueText)) {
     tests.push("Any personal or guest use undercuts exclusive-use support.");
     tests.push("Treat home office as an opportunity until square footage and use facts are verified.");
   } else if (/mileage|vehicle|auto/.test(issueText)) {
     tests.push("Partial-year mileage support should not be extrapolated into a full-year deduction.");
     tests.push("Mileage needs date, destination, miles, and business purpose support.");
+  } else if (/dependent|childcare|child care/.test(issueText)) {
+    tests.push("Provider name, TIN/EIN, amount paid, and work-related care purpose need to agree before credit review.");
+    tests.push("A statement alone is not enough if payment support or provider ID is incomplete.");
+  } else if (/k-?1|partnership|schedule e/.test(issueText)) {
+    tests.push("K-1 income should not be copied into Schedule E until basis, passive activity, and at-risk limitations are reviewed.");
+    tests.push("Footnotes can change the return treatment even when the main K-1 boxes look complete.");
+  } else if (/crypto|digital|tax.lot/.test(issueText)) {
+    tests.push("Missing cost-basis lots can turn a seemingly complete exchange export into an unsupported capital gain position.");
+    tests.push("Wallet transfers need source confirmation before treating them as nontaxable movements.");
   } else if (/resident|residency|state|move/.test(issueText)) {
     tests.push("A mid-year move needs exact move date, domicile facts, and workday allocation.");
     tests.push("A W-2 employer in the former state can create allocation review even after a move.");

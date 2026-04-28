@@ -1,0 +1,8 @@
+Form 1098 Mortgage Interest Statement
+Tax year: 2024
+Borrower: Ben Larson
+Lender: Harbor Home Lending
+Property: 812 Oak Gate Ave rental property
+Mortgage interest received from borrower: $18,920.44
+Real estate taxes paid: $6,410.12
+Outstanding mortgage principal: $458,000.00

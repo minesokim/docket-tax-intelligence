@@ -1,0 +1,8 @@
+Equity compensation supplement
+Tax year: 2024
+Employee: Avery Chen
+Employer: Nimbus Robotics
+RSU shares vested: 640
+RSU income included in W-2: $24,600.00
+Shares withheld for taxes: 182
+Brokerage transfer note: shares deposited to Fidelity brokerage account.

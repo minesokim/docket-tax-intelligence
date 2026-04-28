@@ -117,6 +117,8 @@ function scoreCitationFit(packet: SourcePacketItem, issuePacket: IssueReasoningP
     (/stock|broker|1099-b|capital/.test(issueText.toLowerCase()) && /broker|1099-b|6045|capital/.test(sourceText)) ||
     (/crypto|digital.asset|virtual.currency|tax.lot|unsupported/.test(issueText.toLowerCase()) && /crypto|digital.asset|digital assets|virtual.currency|form 8949|schedule d|unsupported|tax.lot/.test(sourceText)) ||
     (/education|student|1098-t|tuition/.test(issueText.toLowerCase()) && /education|student|1098-t|tuition/.test(sourceText)) ||
+    (/dependent|childcare|child care|provider/.test(issueText.toLowerCase()) && /dependent care|childcare|provider|503/.test(sourceText)) ||
+    (/1098|mortgage|rental/.test(issueText.toLowerCase()) && /1098|mortgage|936|rental/.test(sourceText)) ||
     (/retirement|1099-r|pension|ira/.test(issueText.toLowerCase()) && /retirement|1099-r|pension|ira/.test(sourceText)) ||
     (/residen|state|california|texas/.test(issueText.toLowerCase()) && /residen|state|california|domicile/.test(sourceText));
   if (keywordFit) return 1;

@@ -33,7 +33,7 @@ describe("tax chat orchestrator artifacts", () => {
     expect(response.answer.artifacts?.immutableContentHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it("routes Priya to her own client file and preserves missing 1095-A evidence", async () => {
+  it("routes Priya to her own client file and preserves 1095-A reconciliation evidence", async () => {
     const response = await buildTaxChatResponse("Run the full reviewer memo for Priya");
 
     expect(response.contextLabel).toContain("Priya Narayan");
@@ -41,7 +41,7 @@ describe("tax chat orchestrator artifacts", () => {
     expect(response.answer.artifacts?.issueAnalyses).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          title: "Marketplace coverage mentioned with no 1095-A",
+          title: "Marketplace 1095-A needs ACA reconciliation",
           blocker: true,
           reviewerState: "NEEDS_EVIDENCE",
         }),
@@ -51,7 +51,7 @@ describe("tax chat orchestrator artifacts", () => {
       expect.arrayContaining([
         expect.objectContaining({
           issueId: "issue-priya-narayan-marketplace-1095a",
-          missingFacts: expect.arrayContaining(["Request Form 1095-A before finalizing ACA-related return items."]),
+          missingFacts: expect.arrayContaining(["Review Form 1095-A monthly coverage, premiums, SLCSP, and APTC before finalizing ACA-related return items."]),
           authoritySourcePacketIds: expect.arrayContaining([
             "packet-tax_citation-cite-form1095a-marketplace",
           ]),

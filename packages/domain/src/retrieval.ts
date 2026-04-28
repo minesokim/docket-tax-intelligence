@@ -372,7 +372,10 @@ function expandSearchQuery(query: string): string {
   if (/crypto|digital asset|virtual currency|taxlot/.test(normalized)) aliases.push("digital assets virtual currency cryptocurrency capital gain form 8949 schedule d unsupported taxlot");
   if (/1095a|marketplace|premium|aca/.test(normalized)) aliases.push("1095a marketplace premium tax credit aca");
   if (/education|student|1098t|tuition/.test(normalized)) aliases.push("education credit student 1098t tuition");
+  if (/dependent|childcare|child care|provider|care/.test(normalized)) aliases.push("dependent care childcare provider ein work related care credit");
+  if (/1098|mortgage|interest|rental/.test(normalized)) aliases.push("1098 mortgage interest rental property real estate taxes");
   if (/1099r|retirement|pension|ira|distribution/.test(normalized)) aliases.push("retirement pension ira distribution 1099r");
+  if (/1099div|dividend|qualified/.test(normalized)) aliases.push("1099div dividends qualified dividends investment income");
   if (/resident|residency|domicile|state|california|texas/.test(normalized)) aliases.push("state residency domicile part year nonresident allocation");
   return [query, ...aliases].join(" ");
 }

@@ -1,0 +1,8 @@
+Form 1098-T Tuition Statement
+Tax year: 2024
+Student: Lena Martinez
+School: Cascadia State University
+Payments received for qualified tuition and related expenses: $14,800.00
+Scholarships or grants: $3,200.00
+Student at least half-time: true
+Graduate student: false

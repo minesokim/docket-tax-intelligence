@@ -1,0 +1,9 @@
+Crypto tax-lot report
+Tax year: 2024
+Client: Omar Haddad
+Exchange: Coinbase
+Proceeds: $12,640.82
+Cost basis: $9,112.48
+Disposals: 27
+Missing cost basis lots: 3
+Wallet transfer note: two external wallet transfers require source confirmation.

@@ -1,0 +1,10 @@
+State workday allocation worksheet
+Tax year: 2024
+Client: Hannah Kim
+California workdays before move: 84
+California workdays after move: 18
+Oregon workdays: 92
+Remote workdays: 110
+Employer state wages CA: $119,400.00
+Move date: 2024-06-15
+Domicile note: lease and driver license changed to Oregon in June.

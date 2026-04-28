@@ -1,0 +1,6 @@
+Form 1099-INT Interest Income
+Tax year: 2024
+Recipient: Nora Williams
+Payer: Ally Bank
+Interest income: $1,240.55
+Early withdrawal penalty: $0.00
