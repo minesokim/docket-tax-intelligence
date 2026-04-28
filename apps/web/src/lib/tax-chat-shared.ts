@@ -15,6 +15,7 @@ export type SourceIndexEntry = {
 
 export type ChatAnswer = {
   mode: "client-return" | "general-research" | "firm-portfolio";
+  presentation?: "conversation" | "memo" | "refusal" | "work_product";
   headline: string;
   answer: string[];
   verdict?: {

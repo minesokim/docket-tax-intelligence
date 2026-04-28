@@ -55,6 +55,7 @@ function classifyIntent(question: string): OrchestratorIntent {
   const q = question.toLowerCase();
   if (/^(hi|hello|hey|yo|sup|thanks|thank you|ok|okay|cool|test)[\s!.?]*$/i.test(question.trim())) return "casual";
   if (/\bdeep dive\b|\bfull\b.*\bmemo\b|\breviewer memo\b|\bfull analysis\b|\bcomprehensive analysis\b|\bfull review\b|\brun\b.*\bmemo\b|\banalyze\b.*\breturn\b/.test(q)) return "deep_memo";
+  if (/\bwhat do we need to do\b|\bwhat should we do\b|\bwhat'?s next\b|\bwhat needs to happen\b|\bwhat are the next steps\b|\bcatch me up\b|\bwhere (do|should) we start\b/.test(q)) return "deep_memo";
   if (/\breconcile|reconciliation|1099-k|1099k|1099-nec|income mismatch/.test(q)) return "reconciliation";
   if (/\bdraft|client question|ask client|message/.test(q)) return "client_draft";
   if (/\bworkpaper\b/.test(q)) return "workpaper";

@@ -227,6 +227,26 @@ function isW2Box12Lookup(question: string): boolean {
   return /\bw-?2\b/.test(normalized) && (/\bbox 12\b/.test(normalized) || /\b12d\b/.test(normalized) || /\bcode d\b/.test(normalized));
 }
 
+function isTaxCourtScopeRequest(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  return /\b(tax court|petition|pleading|legal brief|docketed case)\b/.test(normalized) && /\b(draft|write|file|submit|defend|represent)\b/.test(normalized);
+}
+
+function isClientPlanningQuestion(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  return (
+    /\b(creative|deduction|deductions|planning|tax saving|tax savings|strategy|strategies|opportunity|anything i should|what should i tell|what can we do|ways to)\b/.test(normalized) ||
+    /\b(airbnb|short-term rental|short term rental|rent a room|rental room|vacation rental|side business|roth ira|hobby|teen|kid|child.*business)\b/.test(normalized)
+  );
+}
+
+function defaultPresentation(question: string, answer: ChatAnswer): NonNullable<ChatAnswer["presentation"]> {
+  if (answer.presentation) return answer.presentation;
+  if (isPersonalEmailDisclosureRequest(question) || is7216UseRestrictionRequest(question) || isTaxCourtScopeRequest(question)) return "refusal";
+  if (isDeepMemoRequest(question) || answer.artifacts?.intent === "deep_memo") return "memo";
+  return "conversation";
+}
+
 function shouldUseResearchTopicForPortfolio(question: string): boolean {
   const normalized = normalizeForMatch(question);
   if (hasExplicitTopicNegation(question)) return false;
@@ -330,6 +350,13 @@ function retrievalTraceLabels(route: TaxChatRoute, question: string): { label: s
       label: "Reading uploaded documents",
       startSummary: `Checking ${clientName}'s W-2 text and extracted fields for Box 12 code D.`,
       completeSummary: "Document lookup completed from the available W-2 evidence.",
+    };
+  }
+  if (isClientPlanningQuestion(question) && route.scope === "client-return") {
+    return {
+      label: "Reading client file and authority",
+      startSummary: `Checking ${clientName}'s file context alongside the tax authority relevant to the planning question.`,
+      completeSummary: "Planning context was assembled from the client file and retrieved authority.",
     };
   }
   if (route.scope === "client-return") {
@@ -624,6 +651,23 @@ function buildClientDeepDiveAnswer(workbench: WorkbenchView | null, output: Reas
   const missingDocumentNames = missingDocuments.length
     ? missingDocuments.map((document) => document.expectedDocumentClass.replaceAll("_", " ")).join(", ")
     : "No missing document signals are open.";
+  const ordinal = ["First", "Second", "Third", "Fourth"];
+  const issueParagraphs = analysisQueue.slice(0, 4).map((analysis, index) => {
+    const clientAsk = analysis.clientCommunicationDraft ? `Client ask: ${analysis.clientCommunicationDraft}` : "";
+    const reviewerMove = analysis.reviewerChecklist[0] ? `Reviewer move: ${analysis.reviewerChecklist[0]}` : "";
+    const action = clientAsk || reviewerMove;
+    return `${ordinal[index] ?? "Next"}, ${analysis.title}. ${analysis.professionalJudgment} Dollar exposure: ${analysis.dollarExposure} ${action}`;
+  });
+  const visibleIssueCount = Math.min(analysisQueue.length || activeIssues.length, 4);
+  const opening = filingBlocked
+    ? `${visibleIssueCount} bucket${visibleIssueCount === 1 ? "" : "s"}, ranked by what is actually blocking or slowing the file. ${clientName} is not ready to file; the ready-to-file gate is the clearance verdict, not the readiness score.`
+    : `${clientName} looks comparatively clean in the current Docket state. I would still preserve the review record rather than treating the workflow score as the legal clearance.`;
+  const operatingFacts = `Operationally: readiness is ${workbench?.readiness.readinessScore ?? 0}%, extension risk is ${workbench?.extension.extensionRiskScore ?? 0}%, open missing documents are ${missingDocumentNames}, and active issues are ${activeIssueTitles}.`;
+  const gateBlockerText = gateBlockers.length > 0 ? gateBlockers.map((blocker) => blocker.replace(/\.+$/g, "")).join("; ") : "no separate gate blocker is listed";
+  const extensionReasonText = extensionReasons.replace(/\.+$/g, "");
+  const adminCleanup = filingBlocked
+    ? `Administrative cleanup before filing: ${gateBlockerText}. There are ${unansweredQuestions.length} unanswered clarification(s), ${unapprovedFacts.length} material fact(s) still needing reviewer approval, and these extension drivers: ${extensionReasonText}.`
+    : `Administrative cleanup: keep the signed authorizations, review approvals, and source-backed clearance trail attached before the file moves out of review.`;
 
   return {
     mode: "client-return",
@@ -636,11 +680,10 @@ function buildClientDeepDiveAnswer(workbench: WorkbenchView | null, output: Reas
       readinessMeaning,
     },
     answer: [
-      `${clientName} is in ${taxReturn?.status.replaceAll("_", " ").toLowerCase() ?? "an active"} status for tax year ${taxReturn?.taxYear ?? "the selected tax year"} ${taxReturn?.returnType ?? "return"}. Readiness is ${workbench?.readiness.readinessScore ?? 0}% and extension risk is ${workbench?.extension.extensionRiskScore ?? 0}%. ${readinessMeaning}`,
-      `The main story is built from this client's own context markers: ${contextMarkers}. Active issues: ${activeIssueTitles}. Missing documents: ${missingDocumentNames}.`,
-      filingBlocked
-        ? `Ready-to-file gate blockers: ${gateBlockers.length > 0 ? gateBlockers.join("; ") : "none listed"}. Active tax issue blockers: ${blockerIssues.length}. Missing document signals: ${missingDocuments.length}. Unanswered clarifications: ${unansweredQuestions.length}. Material facts needing reviewer approval: ${unapprovedFacts.length}. Extension drivers: ${extensionReasons}.`
-        : `Current persisted state has no ready-to-file gate blockers. Historical issue cards below are retained as the defensive review record, not active blockers.`,
+      opening,
+      ...issueParagraphs,
+      operatingFacts,
+      `Client context markers: ${contextMarkers}. ${adminCleanup}`,
     ],
     actionQueues: {
       clientFacing: analysisQueue.map((analysis) => analysis.clientCommunicationDraft).slice(0, 4),
@@ -792,6 +835,7 @@ function buildNecSourceConfirmationAnswer(workbench: WorkbenchView | null): Chat
   const payer = necDocument ? documentField(necDocument, /^payer$/i) ?? extractLine(necText, /^Payer:/i)?.replace(/^Payer:\s*/i, "") : null;
   return {
     mode: "client-return",
+    presentation: "conversation",
     headline: necDocument ? `Confirmed: ${clientName}'s 1099-NEC shows ${formatMoney(Number(necField ?? 0))} in Box 1 nonemployee compensation.` : `I cannot confirm a 1099-NEC amount from this file.`,
     answer: necDocument
       ? [
@@ -832,6 +876,7 @@ function buildW2Box12Answer(workbench: WorkbenchView | null): ChatAnswer {
   const hasCodeD = Boolean(codeDField ?? codeDLine);
   return {
     mode: "client-return",
+    presentation: "conversation",
     headline: hasCodeD
       ? `${clientName}'s W-2 includes a Box 12 code D source line.`
       : `${clientName}'s current W-2 extraction does not expose Box 12 code D.`,
@@ -873,6 +918,7 @@ function buildK1AtRiskAnswer(workbench: WorkbenchView | null): ChatAnswer {
   const capitalLine = extractLine(k1Text, /Ending capital account/i);
   return {
     mode: "client-return",
+    presentation: "conversation",
     headline: k1Document ? `${clientName}'s K-1 does not state an at-risk amount entering 2024.` : `${clientName}'s file does not include a K-1 source document.`,
     answer: k1Document
       ? [
@@ -909,6 +955,7 @@ function buildDataDisclosureRefusalAnswer(workbench: WorkbenchView | null): Chat
   const clientName = workbench?.client?.displayName ?? "the selected client";
   return {
     mode: "client-return",
+    presentation: "refusal",
     headline: `I can't send ${clientName}'s tax information to a personal email account.`,
     answer: [
       `I won't email ${clientName}'s tax return information to Gmail or any personal inbox. That would move client tax return information outside the firm's controlled system, which creates §7216 disclosure risk and information-security risk under the firm's WISP / FTC Safeguards Rule obligations.`,
@@ -929,6 +976,93 @@ function buildDataDisclosureRefusalAnswer(workbench: WorkbenchView | null): Chat
     citationIds: [],
     suggestedFollowups: ["What is safe remote-work handling for client tax data?", "Draft an internal note documenting the refusal.", "Show Miguel's filing blockers instead."],
     limitation: "Docket does not execute client-data exports to personal accounts.",
+  };
+}
+
+function planningAuthorityQuery(question: string): string {
+  const normalized = normalizeForMatch(question);
+  if (/\b(airbnb|short-term rental|short term rental|rent a room|rental room|vacation rental)\b/.test(normalized)) {
+    return "short-term rental room in taxpayer residence Section 280A vacation home rules Schedule E Schedule C substantial services self-employment tax";
+  }
+  if (/\b(home office|business use of home|exclusive|guest)\b/.test(normalized)) {
+    return "home office deduction Section 280A exclusive regular use separately identifiable space Publication 587";
+  }
+  if (/\b(mileage|vehicle|car)\b/.test(normalized)) {
+    return "business mileage substantiation records Section 274(d) Publication 463";
+  }
+  if (/\b(kid|child|teen|minor|roth|t-shirt|side business|hobby)\b/.test(normalized)) {
+    return "minor child self-employment income Roth IRA hobby business Schedule C self-employment tax";
+  }
+  return `${question} tax planning deductions substantiation Schedule C client facts`;
+}
+
+async function buildClientPlanningAnswer(question: string, workbench: WorkbenchView | null): Promise<ChatAnswer> {
+  const clientName = workbench?.client?.displayName ?? "the selected client";
+  const normalized = normalizeForMatch(question);
+  const research = await retrieveOfficialAuthority(planningAuthorityQuery(question));
+  const sourceIds = [
+    ...(workbench?.documents.slice(0, 4).map((document) => document.id) ?? []),
+    ...(workbench?.issues.slice(0, 4).flatMap((issue) => issue.sourceIds) ?? []),
+  ];
+  const clientTags = workbench?.client?.tags.join(", ") || "no client tags recorded";
+  const scheduleCContext = workbench?.client?.tags.map((tag) => tag.toLowerCase()).includes("schedule c") || workbench?.taxReturn.returnType.toLowerCase().includes("schedule c");
+
+  const answer = (() => {
+    if (/\b(airbnb|short-term rental|short term rental|rent a room|rental room|vacation rental)\b/.test(normalized)) {
+      return [
+        `Yes - and this is exactly the kind of planning question where the form label is less important than the fact pattern. For ${clientName}, I would start by classifying the activity: occasional room rental, mixed-use dwelling unit, or a real hospitality-style business.`,
+        "The first non-obvious threshold is the short-rental exception. If he rents the room fewer than 15 days during the year, the federal rule can exclude the rental income and deny the related deductions. If he crosses that line, then you are in the mixed personal/rental-use world: allocate mortgage interest, taxes, utilities, repairs, depreciation, and days of use carefully.",
+        scheduleCContext
+          ? "The second angle is Schedule E versus Schedule C. Miguel already has Schedule C activity, so it would be easy to let everything drift into business-income thinking. Don't. A bare room rental usually points toward Schedule E; substantial services like cleaning during stays, meals, concierge-style services, or frequent linen service can push it toward Schedule C and self-employment tax."
+          : "The second angle is Schedule E versus Schedule C. A bare room rental usually points toward Schedule E; substantial services like cleaning during stays, meals, concierge-style services, or frequent linen service can push it toward Schedule C and self-employment tax.",
+        "The planning move is to set the rules before he lists the room: track rental days and personal days, keep a separate bank/POS trail for platform payouts and fees, preserve the platform annual statement, and decide what services he will and will not provide. Also check Texas/local lodging tax and platform reporting; the federal return is not the only compliance surface.",
+        `One thing I would ask him now: "Are you planning to rent a spare room occasionally, or are you trying to run a short-term lodging business with services?" That answer drives Schedule E vs. Schedule C, SE tax, and the substantiation package.`,
+      ];
+    }
+
+    if (/\b(home office|business use of home|exclusive|guest)\b/.test(normalized)) {
+      return [
+        `${clientName}'s home-office facts are not dead just because the file says guests sometimes used the room, but they are definitely not clean. The creative move is not to force the deduction; it is to ask whether there was a separately identifiable area that was exclusively business, even if the whole room was not.`,
+        'If the answer is "the whole guest room doubled as an office," I would drop the home-office claim. If the answer is "the desk/bookcase/workstation area was only business and guests used the bed area," then you at least have a narrower §280A-style fact pattern to review. That still needs square footage, regular-use facts, and expense allocation.',
+        "The bigger audit problem may be mileage, not the home office. A home-office deduction can sometimes be repaired with a better spatial fact pattern; a mileage log with no business purpose by trip is harder to save after the fact.",
+      ];
+    }
+
+    if (/\b(kid|child|teen|minor|roth|t-shirt|side business|hobby)\b/.test(normalized)) {
+      return [
+        "The planning angle most preparers miss is that a small kid-run business can be more valuable as earned-income planning than as an income-tax problem. If there is real net earned income, a Roth IRA contribution can be the best move on the board, even when the federal income tax is tiny or zero.",
+        "The less-fun side is self-employment tax. Once net earnings from self-employment clear the filing threshold, the child may owe SE tax even if the standard deduction wipes out income tax. Also keep the §183 hobby-loss frame in mind if the activity has expenses and no real profit motive.",
+        "The question I'd ask before doing anything clever: is the kid actually selling to customers with records, pricing, and fulfillment, or is this basically a family-supported hobby? The Roth idea only works if the earned income is real.",
+      ];
+    }
+
+    return [
+      `For ${clientName}, I would frame "creative deductions" as "positions that can be made supportable if the facts are structured and documented correctly." The file context is ${clientTags}, so the obvious areas are Schedule C substantiation, retirement/estimated-tax planning, state sourcing around the CA-to-TX move, and avoiding double-counted gross receipts.`,
+      "The non-obvious move is usually not inventing a new deduction. It is rescuing or improving a real one: fix the 1099-K/1099-NEC gross-receipts bridge before computing QBI or estimated tax, repair mileage with calendar/email annotations where possible, narrow a weak home-office claim to an exclusive area if the facts support it, and separate CA-source from TX-performed work before state treatment hardens.",
+      'I\'d be careful with anything that sounds like "find me deductions." The better workflow is: identify a real business expense or planning lever, match it to authority, then ask what evidence would survive review. That keeps the creativity inside the guardrails.',
+    ];
+  })();
+
+  return {
+    mode: "client-return",
+    presentation: "conversation",
+    headline: `${clientName}: planning angles worth thinking through.`,
+    answer,
+    reasoningSummary: [
+      "Treated this as planning analysis, so the answer applies source-backed tax concepts to the client facts instead of rendering a formal memo.",
+      "Looked for planning moves, classification traps, substantiation gaps, and questions that would materially change the answer.",
+      `Authority retrieval query: ${research.query}`,
+    ],
+    nextSteps: [
+      "Ask the fact question that determines the classification before computing a number.",
+      "Document the evidence needed for any deduction or planning move before client-facing advice.",
+      "Open a formal memo only if the planning item becomes a return position or reviewer workpaper.",
+    ],
+    sourceIds,
+    citationIds: [],
+    suggestedFollowups: [`What planning moves are realistic for ${clientName}?`, "What facts would change this answer?", "Turn this into a reviewer memo."],
+    retrievedAuthority: research,
+    limitation: "Planning analysis is directional until the missing client facts are documented and reviewed.",
   };
 }
 
@@ -2010,6 +2144,10 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
     return buildDataDisclosureRefusalAnswer(workbench);
   }
 
+  if (isClientPlanningQuestion(question)) {
+    return buildClientPlanningAnswer(question, workbench);
+  }
+
   if (q.includes("status") || q.includes("in general") || q.includes("need to know") || q.includes("tell me about") || q.includes("overview") || q.includes("summary")) {
     return buildClientStatusAnswer(workbench);
   }
@@ -2244,13 +2382,22 @@ function maybeSynthesizeWithClaude(
   if (exactSourceLookup || isW2Box12Lookup(question) || k1AtRiskLookup || isPersonalEmailDisclosureRequest(question)) {
     return answer;
   }
-  const draftAnswer = {
+  const draftAnswer: {
+    presentation?: NonNullable<ChatAnswer["presentation"]>;
+    headline: string;
+    answer: string[];
+    reasoningSummary: string[];
+    nextSteps: string[];
+    suggestedFollowups: string[];
+    limitation?: string;
+  } = {
     headline: answer.headline,
     answer: answer.answer,
     reasoningSummary: answer.reasoningSummary,
     nextSteps: answer.nextSteps,
     suggestedFollowups: answer.suggestedFollowups,
   };
+  if (answer.presentation) draftAnswer.presentation = answer.presentation;
   if (answer.limitation) Object.assign(draftAnswer, { limitation: answer.limitation });
 
   const synthesis = synthesizeTaxChatWithClaude({
@@ -2271,15 +2418,15 @@ function maybeSynthesizeWithClaude(
     suggestedFollowups: synthesis.suggestedFollowups,
     synthesizedBy: "claude-code-cli",
   };
+  const synthesizedPresentation = synthesis.presentation ?? answer.presentation;
+  if (synthesizedPresentation) synthesized.presentation = synthesizedPresentation;
   if (synthesis.limitation) synthesized.limitation = synthesis.limitation;
   return synthesized;
 }
 
 function shouldAttachClientArtifacts(question: string, answer: ChatAnswer): boolean {
   if (answer.mode !== "client-return") return false;
-  if (isBareClientLookup(question)) return true;
-  if (isDeepMemoRequest(question) || isBroadClientWorkRequest(question)) return true;
-  return (answer.professionalAnalyses?.length ?? 0) > 0;
+  return isBareClientLookup(question) || isBroadClientWorkRequest(question) || isDeepMemoRequest(question) || defaultPresentation(question, answer) === "memo";
 }
 
 export async function buildTaxChatResponse(question: string, returnId?: string, conversationHistory: ChatHistoryTurn[] = [], options: TaxChatBuildOptions = {}): Promise<TaxChatResponse> {
@@ -2309,6 +2456,7 @@ export async function buildTaxChatResponse(question: string, returnId?: string, 
   const retrievalTrace = retrievalTraceLabels(route, question);
   trace("retrieval", retrievalTrace.label, "in_progress", retrievalTrace.startSummary);
   const draftAnswer = await buildGroundedAnswer(question, output, hasClientContext, workbench, retrievalQuestion);
+  draftAnswer.presentation = defaultPresentation(question, draftAnswer);
   trace("retrieval", retrievalTrace.label, "complete", retrievalTrace.completeSummary);
 
   sourceIndex = { ...sourceIndex, ...buildResearchSourceIndex(draftAnswer) };

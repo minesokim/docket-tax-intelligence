@@ -32,8 +32,10 @@ export type TaxChatSynthesisInput = {
   question: string;
   mode: "client-return" | "general-research";
   clientContextLabel: string | null;
+  presentation?: "conversation" | "memo" | "refusal" | "work_product";
   conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
   draftAnswer: {
+    presentation?: "conversation" | "memo" | "refusal" | "work_product";
     headline: string;
     answer: string[];
     reasoningSummary: string[];
@@ -53,6 +55,7 @@ export type TaxChatSynthesisInput = {
 export type TaxChatSynthesisOutput = {
   provider: "claude_code_cli";
   model: "claude-code-cli";
+  presentation?: "conversation" | "memo" | "refusal" | "work_product";
   headline: string;
   answer: string[];
   reasoningSummary: string[];
@@ -145,9 +148,13 @@ function asTaxChatSynthesisOutput(value: unknown, fallback: TaxChatSynthesisInpu
   if (!value || typeof value !== "object") return null;
   const candidate = value as Partial<TaxChatSynthesisOutput>;
   if (typeof candidate.headline !== "string") return null;
+  const presentation = candidate.presentation === "memo" || candidate.presentation === "refusal" || candidate.presentation === "work_product" || candidate.presentation === "conversation"
+    ? candidate.presentation
+    : fallback.presentation;
   const output: TaxChatSynthesisOutput = {
     provider: "claude_code_cli",
     model: "claude-code-cli",
+    ...(presentation ? { presentation } : {}),
     headline: candidate.headline,
     answer: stringArray(candidate.answer, fallback.answer),
     reasoningSummary: stringArray(candidate.reasoningSummary, fallback.reasoningSummary),
@@ -388,22 +395,28 @@ export function synthesizeTaxChatWithClaude(input: TaxChatSynthesisInput): TaxCh
 
   const prompt = [
     "You are Docket AI, an enrolled-agent-grade tax research and return-intelligence assistant for professional preparers.",
-    "Write a natural, memo-grade answer using only the provided Docket evidence packet and official-source snippets.",
-    "Your style should feel like a very strong tax professional: precise, practical, source-aware, and willing to say what facts are missing.",
-    "Follow this professional protocol internally before writing: classify the taxpayer/context, separate facts from assumptions, rank authority, apply authority to the facts supplied, identify substantiation gaps, assess preparer risk, and give reviewer-safe next actions.",
-    "Do not expose hidden chain-of-thought. Provide a concise reasoning summary with the visible professional rationale: facts used, sources checked, authority ranking, uncertainty, and next reviewer-safe actions.",
+    "Write like a senior tax practitioner having a real conversation with another preparer. The answer shape should fit the question; do not force a memo template unless the user asked for a memo, review table, formal workpaper, or exportable work product.",
+    "Use the provided Docket evidence packet and official-source snippets as background context, not as a script. Use what matters, ignore what does not, and say plainly when an important fact or source is missing.",
+    "Your style should feel like a very strong EA: practical, curious, source-aware, willing to give judgment, and willing to spot planning angles the user did not explicitly ask for.",
+    "For fact-pattern questions, look for the non-obvious angle: mixed personal/rental use, hobby vs. business, Roth IRA opportunities from earned income, §280A traps, Schedule C vs Schedule E classification, self-employment tax, state sourcing, deduction substantiation, and preparer-risk smells.",
+    "If the user is doing something legitimate but suboptimal, mention the better angle briefly and then answer what they asked.",
+    "Ask one natural follow-up only when the answer genuinely turns on a missing fact and guessing would materially change the advice.",
+    "Follow this professional protocol internally before writing: classify the taxpayer/context, separate facts from assumptions, rank authority, apply authority to the facts supplied, identify substantiation gaps, assess preparer risk, and identify reviewer-safe next actions.",
+    "Do not expose hidden chain-of-thought. If reasoning is useful, embed the visible professional rationale in the prose. Keep reasoningSummary as short metadata for the UI, not as a second essay.",
     "Do not provide final client-facing tax advice, do not mark filing readiness approved, and do not invent sources or facts.",
     "If sources are insufficient, say exactly what is missing.",
-    "For general research, answer the user's question directly first, then add caveats, missing facts, and practitioner workflow.",
-    "For client-return questions, tie every material point to client file evidence or the retrieved authority packet.",
+    "For general research, answer the user's question directly first, then add only the caveats and workflow that actually matter.",
+    "For client-return questions, tie every material point to client file evidence or the retrieved authority packet, but do not clutter simple answers with unnecessary citation theater.",
+    "Default presentation is conversation. Use presentation='memo' only for explicit memo/review/export requests; presentation='refusal' for refusal answers; presentation='work_product' for draft letters/forms/checklists.",
     "Use conversationHistory to preserve the active chat context, but never treat prior assistant wording as a source.",
     "Return JSON only with this shape:",
     JSON.stringify(
       {
+        presentation: "conversation | memo | refusal | work_product",
         headline: "string",
         answer: ["paragraph string"],
-        reasoningSummary: ["reviewer-facing rationale string"],
-        nextSteps: ["action string"],
+        reasoningSummary: ["short UI metadata string"],
+        nextSteps: ["action string, only if useful"],
         suggestedFollowups: ["short question string"],
         limitation: "optional string",
       },

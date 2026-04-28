@@ -289,6 +289,7 @@ describe("tax research authority ranking", () => {
     const text = response.answer.answer.join("\n");
 
     expect(response.answer.mode).toBe("client-return");
+    expect(response.answer.presentation).toBe("conversation");
     expect(response.contextLabel).toContain("Miguel Sandoval");
     expect(response.answer.artifacts).toBeUndefined();
     expect(response.answer.professionalAnalyses).toBeUndefined();
@@ -302,9 +303,11 @@ describe("tax research authority ranking", () => {
     const text = response.answer.answer.join("\n");
 
     expect(response.answer.mode).toBe("client-return");
+    expect(response.answer.presentation).toBe("conversation");
     expect(response.contextLabel).toContain("Miguel Sandoval");
     expect(response.answer.headline).toContain("not ready to file");
     expect(response.answer.artifacts).toBeDefined();
+    expect(response.answer.artifacts?.intent).toBe("deep_memo");
     expect(response.answer.professionalAnalyses?.map((analysis) => analysis.title)).toContain("Freelance income does not reconcile");
     expect(text).toContain("Freelance income does not reconcile");
     expect(text).toContain("Missing 1099-B after stock sale mention");
@@ -324,6 +327,21 @@ describe("tax research authority ranking", () => {
     expect(text).toContain("does not contain a Box 12 code D line or extracted field");
     expect(text).toContain("Box 1 wages");
     expect(text).not.toContain("Issues, ranked by filing impact");
+  }, 15_000);
+
+  it("answers open-ended client planning questions conversationally with non-obvious tax angles", async () => {
+    const response = await buildTaxChatResponse("Miguel mentioned he might rent a room in his Texas place out short-term on Airbnb starting in 2025. Anything I should be telling him?", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("client-return");
+    expect(response.answer.presentation).toBe("conversation");
+    expect(response.contextLabel).toContain("Miguel Sandoval");
+    expect(response.answer.artifacts).toBeUndefined();
+    expect(text).toContain("fewer than 15 days");
+    expect(text).toContain("Schedule E versus Schedule C");
+    expect(text).toContain("substantial services");
+    expect(text).toContain("Texas/local lodging tax");
+    expect(text).not.toContain("What view do you want");
   }, 15_000);
 
   it("uses the named client for K-1 at-risk lookups even when Miguel is loaded", async () => {

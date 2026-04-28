@@ -950,6 +950,66 @@ main {
   background: white;
 }
 
+.conversational-answer {
+  max-width: 780px;
+  gap: 12px;
+}
+
+.conversational-answer .item-card-title {
+  align-items: start;
+}
+
+.conversational-answer h2 {
+  font-size: 18px;
+}
+
+.conversational-answer p {
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.68;
+}
+
+.conversational-answer.refusal-answer {
+  border-left: 3px solid #b42318;
+}
+
+.conversation-meta {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.conversation-meta .reasoning-panel {
+  margin: 0;
+}
+
+.conversation-expander {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfb;
+}
+
+.conversation-expander summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.conversation-expander > ul,
+.conversation-expander > .pill-row,
+.conversation-expander > p,
+.compact-authority-list {
+  margin: 0;
+  padding: 0 12px 12px;
+}
+
+.compact-authority-list {
+  display: grid;
+  gap: 8px;
+}
+
 .thinking-bubble {
   display: flex;
   align-items: center;

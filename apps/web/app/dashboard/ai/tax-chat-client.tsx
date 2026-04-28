@@ -565,23 +565,31 @@ function useTypewriter(text: string, active: boolean) {
   return visible;
 }
 
-function AssistantAnswer({ response, animate }: { response: TaxChatResponse; animate: boolean }) {
+function shouldRenderMemoAnswer(response: TaxChatResponse) {
+  return response.answer.presentation === "memo";
+}
+
+function ConversationalAnswer({ response, animate }: { response: TaxChatResponse; animate: boolean }) {
   const { answer, sourceIndex } = response;
-  const sourceIds = Array.from(new Set([...answer.sourceIds, ...answer.citationIds]));
+  const sourceIds = Array.from(new Set([...answer.sourceIds, ...answer.citationIds, ...(answer.retrievedAuthority?.sources.map((source) => source.id) ?? [])]));
   const animatedBody = useTypewriter(answer.answer.join("\n\n"), animate);
   const bodyParagraphs = animatedBody.split("\n\n").filter(Boolean);
-
-  if (answer.mode === "client-return" || answer.mode === "general-research" || answer.mode === "firm-portfolio") {
-    return <MemoAnswer response={response} animate={animate} />;
-  }
+  const badgeLabel = answer.presentation === "refusal"
+    ? "Refusal"
+    : answer.mode === "firm-portfolio"
+      ? "Portfolio"
+      : answer.mode === "general-research"
+        ? "Research"
+        : "Client file";
+  const badgeTone = answer.presentation === "refusal" ? "red" : answer.mode === "firm-portfolio" ? "blue" : answer.mode === "client-return" ? "green" : "yellow";
 
   return (
     <article className="chat-message assistant-message">
       <div className="chat-avatar">AI</div>
-      <div className="chat-bubble">
+      <div className={`chat-bubble conversational-answer ${answer.presentation === "refusal" ? "refusal-answer" : ""}`}>
         <div className="item-card-title">
           <h2>{answer.headline}</h2>
-          <StatusBadge label={answer.mode === "client-return" ? "Client-file mode" : "Research mode"} tone={answer.mode === "client-return" ? "green" : "yellow"} />
+          <StatusBadge label={badgeLabel} tone={badgeTone} />
         </div>
         {bodyParagraphs.map((paragraph) => (
           <p key={paragraph}>{paragraph}</p>
@@ -609,108 +617,63 @@ function AssistantAnswer({ response, animate }: { response: TaxChatResponse; ani
           </div>
         ) : null}
 
-        <div className="chat-answer-grid">
-          <div>
-            <h3>Reasoning summary</h3>
-            <ul>{answer.reasoningSummary.map((item) => <li key={item}>{item}</li>)}</ul>
-          </div>
-          <div>
-            <h3>Next steps</h3>
-            <ul>{answer.nextSteps.map((item) => <li key={item}>{item}</li>)}</ul>
-          </div>
-        </div>
-
-        {answer.actionQueues ? (
-          <div className="chat-answer-grid">
-            <div>
-              <h3>Client-facing queue</h3>
-              <ul>{answer.actionQueues.clientFacing.map((item) => <li key={item}>{item}</li>)}</ul>
-            </div>
-            <div>
-              <h3>Preparer-facing queue</h3>
-              <ul>{answer.actionQueues.preparerFacing.map((item) => <li key={item}>{item}</li>)}</ul>
-            </div>
-          </div>
-        ) : null}
-
         {answer.professionalAnalyses?.length ? (
-          <div className="professional-analysis-list">
-            <h3>EA-grade review frame</h3>
-            {answer.professionalAnalyses.map((analysis) => (
-              <article className="professional-analysis-card" key={analysis.issueId}>
-                <div className="item-card-title">
-                  <h4>{analysis.title}</h4>
-                  <StatusBadge label={analysis.statusLabel} tone={analysis.statusLabel.startsWith("Resolved") ? "green" : analysis.statusLabel.startsWith("Blocks") ? "red" : "yellow"} />
-                </div>
-                <small>{analysis.situationMode}</small>
-                <p>{analysis.professionalJudgment}</p>
-                <p><strong>Dollar exposure:</strong> {analysis.dollarExposure}</p>
-                <div className="chat-answer-grid">
-                  <div>
-                    <strong>Rule space</strong>
-                    <ul>{analysis.ruleSpace.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul>
-                  </div>
-                  <div>
-                    <strong>Smell tests</strong>
-                    <ul>{analysis.smellTests.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul>
-                  </div>
-                </div>
-                <div>
-                  <strong>Assumptions to avoid</strong>
-                  <ul>{analysis.assumptionsToAvoid.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul>
-                </div>
-                <div>
-                  <strong>Clearance standard</strong>
-                  <p>{analysis.clearanceStandard}</p>
-                </div>
-                <div>
-                  <strong>Reviewer checklist</strong>
-                  <ul>{analysis.reviewerChecklist.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul>
-                </div>
-                <div>
-                  <strong>Client draft</strong>
-                  <p>{analysis.clientCommunicationDraft}</p>
-                </div>
-                <div>
-                  <strong>Preparer work plan</strong>
-                  <ul>{analysis.preparerWorkPlan.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul>
-                </div>
-                <SourcePills ids={[...analysis.sourceIds, ...analysis.citationIds]} sourceIndex={sourceIndex} />
-              </article>
-            ))}
-          </div>
-        ) : null}
-
-        <div className="chat-citations">
-          <h3>{answer.professionalAnalyses?.length ? "Conversation-level sources" : "Sources cited"}</h3>
-          {answer.professionalAnalyses?.length ? <p>Issue-specific sources are attached inside each EA review card above.</p> : null}
-          {sourceIds.length > 0 ? <SourcePills ids={sourceIds} sourceIndex={sourceIndex} /> : <p>No source citation needed for this message.</p>}
-        </div>
-
-        {answer.retrievedAuthority ? (
-          <div className="chat-citations">
-            <h3>Retrieved authority</h3>
-            <div className="authority-source-list">
-              {answer.retrievedAuthority.sources.map((source) => (
-                <article className="authority-source-card" key={source.id}>
+          <details className="conversation-expander">
+            <summary>Show review frame</summary>
+            <div className="professional-analysis-list">
+              {answer.professionalAnalyses.map((analysis) => (
+                <article className="professional-analysis-card" key={analysis.issueId}>
                   <div className="item-card-title">
-                    <h4><a href={source.sourceUrl}>{source.title}</a></h4>
-                    <StatusBadge label={source.fetchStatus} tone={source.fetchStatus === "LIVE" ? "green" : "red"} />
+                    <h4>{analysis.title}</h4>
+                    <StatusBadge label={analysis.statusLabel} tone={analysis.statusLabel.startsWith("Resolved") ? "green" : analysis.statusLabel.startsWith("Blocks") ? "red" : "yellow"} />
                   </div>
-                  <p>
-                    {source.publisher} · {source.authorityLevel.replaceAll("_", " ")} · retrieved {source.retrievedAt.slice(0, 10)}
-                    {source.pageLastUpdated ? ` · page updated ${source.pageLastUpdated}` : ""}
-                  </p>
-                  {source.error ? <p className="answer-warning">{source.error}</p> : null}
-                  {source.snippets.map((snippet) => <blockquote key={snippet}>{snippet}</blockquote>)}
+                  <p>{analysis.professionalJudgment}</p>
+                  <p><strong>Dollar exposure:</strong> {analysis.dollarExposure}</p>
+                  <SourcePills ids={[...analysis.sourceIds, ...analysis.citationIds]} sourceIndex={sourceIndex} />
                 </article>
               ))}
             </div>
-          </div>
+          </details>
         ) : null}
+
+        <div className="conversation-meta">
+          {response.reasoningTrace?.length ? <LiveReasoningPanel steps={response.reasoningTrace} live={false} /> : null}
+          {(answer.reasoningSummary.length > 0 || answer.nextSteps.length > 0) ? (
+            <details className="conversation-expander">
+              <summary>Show rationale and follow-up</summary>
+              {answer.reasoningSummary.length > 0 ? <ul>{answer.reasoningSummary.map((item) => <li key={item}>{item}</li>)}</ul> : null}
+              {answer.nextSteps.length > 0 ? <ul>{answer.nextSteps.map((item) => <li key={item}>{item}</li>)}</ul> : null}
+            </details>
+          ) : null}
+          {sourceIds.length > 0 || answer.retrievedAuthority ? (
+            <details className="conversation-expander">
+              <summary>Show retrieval trace</summary>
+              {sourceIds.length > 0 ? <SourcePills ids={sourceIds} sourceIndex={sourceIndex} /> : <p>No source citation needed for this message.</p>}
+              {answer.retrievedAuthority ? (
+                <div className="authority-source-list compact-authority-list">
+                  {answer.retrievedAuthority.sources.map((source) => (
+                    <article className="authority-source-card" key={source.id}>
+                      <div className="item-card-title">
+                        <h4><a href={source.sourceUrl}>{source.title}</a></h4>
+                        <StatusBadge label={source.fetchStatus} tone={source.fetchStatus === "LIVE" ? "green" : "red"} />
+                      </div>
+                      <p>{source.publisher} · {source.authorityLevel.replaceAll("_", " ")} · retrieved {source.retrievedAt.slice(0, 10)}</p>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+            </details>
+          ) : null}
+        </div>
       </div>
     </article>
   );
+}
+
+function AssistantAnswer({ response, animate }: { response: TaxChatResponse; animate: boolean }) {
+  return shouldRenderMemoAnswer(response)
+    ? <MemoAnswer response={response} animate={animate} />
+    : <ConversationalAnswer response={response} animate={animate} />;
 }
 
 export function TaxChatClient({ initialQuestion, initialReturnId }: { initialQuestion: string; initialReturnId?: string | undefined }) {
