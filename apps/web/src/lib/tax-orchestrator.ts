@@ -6,7 +6,9 @@ import {
   docketTools,
   type ChatArtifactEnvelope,
   type CitationArtifact,
+  type FactNode,
   type IssueAnalysisArtifact,
+  type IssueReasoningPacket,
   type OrchestrationTraceEvent,
   type PreparerTaskArtifact,
   type ReconciliationTableArtifact,
@@ -112,6 +114,156 @@ function buildReconciliationTables(returnId: string, issueIds: string[]): Reconc
   return table ? [table] : [];
 }
 
+function sourcePacketsByType(sourcePacket: SourcePacketItem[], ids: string[], types: SourcePacketItem["sourceType"][]): string[] {
+  const idSet = new Set(ids);
+  return sourcePacket
+    .filter((packet) => idSet.has(packet.sourceId) && types.includes(packet.sourceType))
+    .map((packet) => packet.id);
+}
+
+function packetIdsForSourceIds(sourcePacket: SourcePacketItem[], sourceIds: string[]): string[] {
+  const sourceIdSet = new Set(sourceIds);
+  return sourcePacket.filter((packet) => sourceIdSet.has(packet.sourceId)).map((packet) => packet.id);
+}
+
+function packetExcerpt(sourcePacket: SourcePacketItem[], packetId: string): string {
+  const packet = sourcePacket.find((item) => item.id === packetId);
+  return packet ? `${packet.label}: ${packet.excerpt}` : packetId;
+}
+
+function dollarsFromText(text: string): number[] {
+  return Array.from(text.matchAll(/\$?\b(\d{1,3}(?:,\d{3})+|\d{4,6})(?:\.\d{2})?\b/g))
+    .map((match) => Number(match[1]?.replaceAll(",", "")))
+    .filter((value) => Number.isFinite(value) && value >= 2000 && value !== 1099 && value !== 1095 && (value < 1900 || value > 2100));
+}
+
+function issueSpecificSmellTests(issue: OrchestratorIssue, sourcePacket: SourcePacketItem[], issuePacketIds: string[]): string[] {
+  const issueText = `${issue.issueType} ${issue.title} ${issue.description}`.toLowerCase();
+  const evidenceText = issuePacketIds.map((id) => packetExcerpt(sourcePacket, id)).join(" ");
+  const dollars = dollarsFromText(evidenceText);
+  const tests: string[] = [];
+
+  if (/1099|income|gross|receipts/.test(issueText)) {
+    const uniqueDollars = Array.from(new Set(dollars)).slice(0, 4);
+    if (uniqueDollars.length >= 2) tests.push(`Compare reported amounts side by side: ${uniqueDollars.map((amount) => amount.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 })).join(" vs ")}.`);
+    tests.push("Check whether processor totals include payer forms before adding both to Schedule C gross receipts.");
+    tests.push("Do not accept a client estimate as final gross receipts without a payer/payment-channel bridge.");
+  } else if (/1095|marketplace|premium/.test(issueText)) {
+    tests.push("Marketplace coverage without Form 1095-A can affect premium tax credit reconciliation.");
+    tests.push("Do not clear ACA-related return items from organizer text alone.");
+  } else if (/1099-b|broker|stock|capital/.test(issueText)) {
+    tests.push("A stock-sale mention needs proceeds, basis, holding period, and wash-sale detail.");
+    tests.push("Prior-year brokerage activity makes a missing consolidated 1099 more plausible.");
+  } else if (/home.office|exclusive/.test(issueText)) {
+    tests.push("Any personal or guest use undercuts exclusive-use support.");
+    tests.push("Treat home office as an opportunity until square footage and use facts are verified.");
+  } else if (/mileage|vehicle|auto/.test(issueText)) {
+    tests.push("Partial-year mileage support should not be extrapolated into a full-year deduction.");
+    tests.push("Mileage needs date, destination, miles, and business purpose support.");
+  } else if (/resident|residency|state|move/.test(issueText)) {
+    tests.push("A mid-year move needs exact move date, domicile facts, and workday allocation.");
+    tests.push("A W-2 employer in the former state can create allocation review even after a move.");
+  }
+
+  tests.push(issue.blocker ? "False clearance would move a blocked return toward filing without the required evidence." : "Clearance depends on documenting the missing fact and reviewer judgment.");
+  return Array.from(new Set(tests)).slice(0, 5);
+}
+
+function buildIssueReasoningPackets(input: {
+  workbench: OrchestratorWorkbench;
+  selectedIssues: OrchestratorIssue[];
+  sourcePacket: SourcePacketItem[];
+  factGraph: FactNode[];
+  preparerTasks: PreparerTaskArtifact[];
+  readyToFileGate: ReturnType<typeof docketTools.runReviewGateCheck>;
+}): IssueReasoningPacket[] {
+  return input.selectedIssues.map((issue) => {
+    const issuePacketIds = packetIdsForSourceIds(input.sourcePacket, issue.sourceIds);
+    const authoritySourcePacketIds = localAuthorityPacketIds(input.sourcePacket, issue.title, issue.issueType);
+    const verifiedFacts = input.factGraph.filter((fact) => issue.sourceIds.includes(fact.id.replace(/^fact-node-/, "")) || fact.sourcePacketIds.some((packetId) => issuePacketIds.includes(packetId)));
+    const relatedQuestions = input.workbench.questions.filter((question) => question.relatedIssueId === issue.id);
+    const relatedTasks = input.preparerTasks.filter((task) => task.relatedIssueId === issue.id);
+    const sourceIds = new Set(issue.sourceIds);
+    const missingDocumentPackets = input.sourcePacket.filter((packet) => packet.sourceType === "missing_document" && (packet.excerpt.toLowerCase().includes(issue.title.toLowerCase().split(" ")[0] ?? "") || issue.description.toLowerCase().includes(packet.label.toLowerCase())));
+    const documentEvidencePacketIds = sourcePacketsByType(input.sourcePacket, issue.sourceIds, ["document", "tax_fact"]);
+    const clientClaimPacketIds = sourcePacketsByType(input.sourcePacket, issue.sourceIds, ["client_claim"]);
+    const conversationClaimPacketIds = sourcePacketsByType(input.sourcePacket, issue.sourceIds, ["conversation"]);
+    const priorYearPatternPacketIds = sourcePacketsByType(input.sourcePacket, issue.sourceIds, ["prior_year_pattern"]);
+    const evidencePacketIds = Array.from(new Set([...issuePacketIds, ...documentEvidencePacketIds, ...clientClaimPacketIds, ...conversationClaimPacketIds, ...missingDocumentPackets.map((packet) => packet.id)]));
+    const missingFacts = Array.from(
+      new Set([
+        ...relatedQuestions.map((question) => question.question),
+        issue.recommendedAction,
+        ...missingDocumentPackets.map((packet) => `Obtain or waive ${packet.label}.`),
+      ]),
+    ).filter(Boolean);
+
+    return {
+      id: `issue-packet-${issue.id}`,
+      issueId: issue.id,
+      title: issue.title,
+      situationClassification: {
+        mode: issue.issueType.replaceAll("_", " ").toLowerCase(),
+        taxYear: input.workbench.taxReturn.taxYear,
+        jurisdiction: input.workbench.taxReturn.jurisdiction,
+        returnType: input.workbench.taxReturn.returnType,
+        riskLevel: issue.riskLevel,
+        blocker: issue.blocker,
+      },
+      reconstructedFacts: verifiedFacts.map((fact) => ({
+        factNodeId: fact.id,
+        label: fact.label,
+        value: fact.value,
+        reviewerState: fact.reviewerState,
+        sourcePacketIds: fact.sourcePacketIds,
+      })),
+      verifiedFactNodeIds: verifiedFacts.map((fact) => fact.id),
+      clientClaimPacketIds,
+      conversationClaimPacketIds,
+      documentEvidencePacketIds,
+      authoritySourcePacketIds,
+      priorYearPatternPacketIds,
+      missingFacts,
+      evidencePacketIds,
+      smellTests: issueSpecificSmellTests(issue, input.sourcePacket, evidencePacketIds),
+      reviewGateImpact: {
+        blocksReadyToFile: issue.blocker || input.readyToFileGate.blockers.some((blocker) => blocker.toLowerCase().includes("red") || blocker.toLowerCase().includes("blocking")),
+        readyToFileBlockers: input.readyToFileGate.blockers,
+        materiality: issue.riskLevel === "RED" ? "HIGH" : issue.riskLevel === "YELLOW" ? "MEDIUM" : "LOW",
+        falseClearanceRisk: issue.blocker
+          ? "Would allow a filing workflow to proceed while a material source-backed issue remains unresolved."
+          : "Would reduce reviewer visibility into a fact pattern that still needs documentation.",
+      },
+      recommendedClientQuestions: relatedQuestions.map((question) => ({
+        id: `question-${question.id}`,
+        question: question.question,
+        sourcePacketIds: packetIdsForSourceIds(input.sourcePacket, question.evidenceRefs.map((evidence) => evidence.sourceId)),
+      })),
+      preparerTasks: relatedTasks.map((task) => ({
+        id: task.id,
+        task: task.task,
+        sourcePacketIds: task.sourcePacketIds,
+      })),
+      clearanceStandard: issue.blocker
+        ? "Clear only after missing evidence is attached, the issue is resolved or formally overridden, and reviewer approval is recorded."
+        : "Clear only after missing facts are documented and the reviewer accepts the position or marks it nonblocking.",
+      assumptionsToAvoid: [
+        "Do not treat client statements as verified tax facts.",
+        "Do not use model memory as authority.",
+        "Do not mark ready to file from workflow readiness percentage alone.",
+        ...(!sourceIds.size ? ["Do not clear an issue that has no direct source packet attached."] : []),
+      ],
+      confidence: artifactConfidence("Issue reasoning packet is built deterministically from source packets, fact graph nodes, authority retrieval, and review gates.", {
+        overall: issue.blocker ? 0.86 : 0.76,
+        sourceSupport: evidencePacketIds.length ? 0.8 : 0.45,
+        retrievalConfidence: 0.86,
+        authorityFit: authoritySourcePacketIds.length ? 0.78 : 0.42,
+        reviewState: issue.blocker ? "NEEDS_EVIDENCE" : "UNREVIEWED",
+      }),
+    };
+  });
+}
+
 function selectRelevantSourcePacket(
   fullSourcePacket: SourcePacketItem[],
   selectedIssues: OrchestratorIssue[],
@@ -128,6 +280,9 @@ function selectRelevantSourcePacket(
     allowedSourceIds.add(issue.id);
     for (const sourceId of issue.sourceIds) allowedSourceIds.add(sourceId);
     for (const packetId of localAuthorityPacketIds(fullSourcePacket, issue.title, issue.issueType)) allowedPacketIds.add(packetId);
+    for (const packet of docketTools.retrieveAuthority(`${issue.title} ${issue.issueType}`, workbench.taxReturn.taxYear, workbench.taxReturn.jurisdiction)) {
+      allowedPacketIds.add(packet.id);
+    }
     for (const questionItem of workbench.questions.filter((item) => item.relatedIssueId === issue.id)) allowedSourceIds.add(questionItem.id);
   }
 
@@ -176,10 +331,21 @@ export function runTaxChatOrchestrator(input: OrchestratorInput): ChatArtifactEn
       blocker: issue.blocker,
     }),
   );
+  const readyToFileGate = docketTools.runReviewGateCheck(input.returnId);
+  const issuePackets = buildIssueReasoningPackets({
+    workbench,
+    selectedIssues,
+    sourcePacket,
+    factGraph,
+    preparerTasks,
+    readyToFileGate,
+  });
+  const issuePacketByIssueId = new Map(issuePackets.map((packet) => [packet.issueId, packet]));
 
   const issueAnalyses: IssueAnalysisArtifact[] = selectedIssues.map((issue, index) => {
     const issuePacketIds = sourceIdsForIssue(issue.sourceIds, sourcePacket);
-    const authorityPacketIds = localAuthorityPacketIds(sourcePacket, issue.title, issue.issueType);
+    const issuePacket = issuePacketByIssueId.get(issue.id);
+    const authorityPacketIds = issuePacket?.authoritySourcePacketIds ?? localAuthorityPacketIds(sourcePacket, issue.title, issue.issueType);
     const relatedQuestions = workbench.questions.filter((question) => question.relatedIssueId === issue.id);
     const relatedWorkpapers = workbench.workpapers.filter((workpaper) => workpaper.body.toLowerCase().includes(issue.title.toLowerCase().split(" ")[0] ?? ""));
     return {
@@ -189,32 +355,34 @@ export function runTaxChatOrchestrator(input: OrchestratorInput): ChatArtifactEn
       riskLevel: issue.riskLevel,
       blocker: issue.blocker,
       reviewerState: issue.status === "CLIENT_QUESTION_PENDING" || issue.blocker ? "NEEDS_EVIDENCE" : "UNREVIEWED",
-      situationMode: issue.issueType.replaceAll("_", " ").toLowerCase(),
-      factPatternSummary: issue.description,
-      verifiedFactNodeIds: factGraph.filter((fact) => issue.sourceIds.includes(fact.id.replace(/^fact-node-/, ""))).map((fact) => fact.id),
-      claimSourcePacketIds: issuePacketIds.filter((id) => sourcePacket.find((packet) => packet.id === id)?.authorityTier === "UNTRUSTED_INPUT"),
-      missingFacts: relatedQuestions.length ? relatedQuestions.map((question) => question.question) : [issue.recommendedAction],
+      situationMode: issuePacket?.situationClassification.mode ?? issue.issueType.replaceAll("_", " ").toLowerCase(),
+      factPatternSummary: issuePacket
+        ? `${issue.description} Reconstructed ${issuePacket.reconstructedFacts.length} verified fact(s), ${issuePacket.clientClaimPacketIds.length + issuePacket.conversationClaimPacketIds.length} claim packet(s), and ${issuePacket.missingFacts.length} missing fact(s).`
+        : issue.description,
+      verifiedFactNodeIds: issuePacket?.verifiedFactNodeIds ?? factGraph.filter((fact) => issue.sourceIds.includes(fact.id.replace(/^fact-node-/, ""))).map((fact) => fact.id),
+      claimSourcePacketIds: issuePacket ? [...issuePacket.clientClaimPacketIds, ...issuePacket.conversationClaimPacketIds] : issuePacketIds.filter((id) => sourcePacket.find((packet) => packet.id === id)?.authorityTier === "UNTRUSTED_INPUT"),
+      missingFacts: issuePacket?.missingFacts ?? (relatedQuestions.length ? relatedQuestions.map((question) => question.question) : [issue.recommendedAction]),
       authoritySourcePacketIds: authorityPacketIds,
-      smellTests: [
+      smellTests: issuePacket?.smellTests ?? [
         issue.blocker ? "This issue blocks filing or materially affects filing readiness." : "This issue requires review before the related position is accepted.",
         issue.sourceIds.length ? "Source packets are attached and should be reviewed before clearance." : "No direct source packet is attached yet; request evidence before clearance.",
         issue.riskLevel === "RED" ? "False clearance would make the return look safer than the current evidence supports." : "Clearance depends on resolving the listed missing facts.",
       ],
-      riskRationale: issue.description,
-      clientQuestionIds: relatedQuestions.map((question) => `question-${question.id}`),
-      preparerTaskIds: [`task-${issue.id}`],
+      riskRationale: issuePacket?.reviewGateImpact.falseClearanceRisk ?? issue.description,
+      clientQuestionIds: issuePacket?.recommendedClientQuestions.map((question) => question.id) ?? relatedQuestions.map((question) => `question-${question.id}`),
+      preparerTaskIds: issuePacket?.preparerTasks.map((task) => task.id) ?? [`task-${issue.id}`],
       workpaperIds: relatedWorkpapers.map((workpaper) => `workpaper-${workpaper.id}`),
       citationIds: authorityPacketIds.map((id) => `artifact-citation-${sourcePacket.find((packet) => packet.id === id)?.sourceId ?? id}`),
-      confidence: artifactConfidence("Issue analysis is produced from issue state, retrieved source packet items, local authority matches, and review gate posture.", {
+      confidence: artifactConfidence("Issue analysis is produced from a deterministic EA issue packet: facts, claims, evidence, authority, missing facts, smell tests, and review gate impact.", {
         overall: issue.blocker ? 0.82 : 0.72,
-        sourceSupport: issuePacketIds.length ? 0.78 : 0.52,
+        sourceSupport: issuePacket?.evidencePacketIds.length ? 0.8 : issuePacketIds.length ? 0.78 : 0.52,
         retrievalConfidence: 0.84,
         authorityFit: authorityPacketIds.length ? 0.76 : 0.45,
         reviewState: issue.blocker ? "NEEDS_EVIDENCE" : "UNREVIEWED",
       }),
     };
   });
-  traces.push(trace("issue_reasoning", `Built ${issueAnalyses.length} issue artifact(s), one per selected active issue.`, "reasonPerIssue", input.question, issueAnalyses.flatMap((analysis) => analysis.authoritySourcePacketIds)));
+  traces.push(trace("issue_reasoning", `Built ${issuePackets.length} EA issue packet(s) and ${issueAnalyses.length} issue artifact(s), one per selected active issue.`, "reasonPerIssue", input.question, issuePackets.flatMap((packet) => [...packet.evidencePacketIds, ...packet.authoritySourcePacketIds])));
 
   const clientQuestions = workbench.questions
     .filter((question) => selectedIssues.some((issue) => issue.id === question.relatedIssueId))
@@ -244,7 +412,6 @@ export function runTaxChatOrchestrator(input: OrchestratorInput): ChatArtifactEn
   const reconciliationTables = intent === "reconciliation" || selectedIssues.some((issue) => /INCOME|1099/i.test(issue.issueType))
     ? buildReconciliationTables(input.returnId, selectedIssues.map((issue) => issue.id))
     : [];
-  const readyToFileGate = docketTools.runReviewGateCheck(input.returnId);
   traces.push(trace("cross_issue_checks", `Review gate pass=${readyToFileGate.pass}; blocker count=${readyToFileGate.blockers.length}.`, "runReviewGateCheck", input.returnId, sourcePacket.filter((packet) => packet.sourceType === "review_gate").map((packet) => packet.id)));
 
   const memo = intent === "deep_memo"
@@ -281,6 +448,7 @@ export function runTaxChatOrchestrator(input: OrchestratorInput): ChatArtifactEn
     generatedAt: nowIso(),
     sourcePacket,
     factGraph,
+    issuePackets,
     memo,
     issueAnalyses,
     citations,

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { StatusBadge } from "../../../src/components/docket-ui";
 import { suggestedQuestions, type ChatAnswer, type ChatHistoryTurn, type SourceIndexEntry, type TaxChatResponse } from "../../../src/lib/tax-chat-shared";
-import type { IssueAnalysisArtifact, ReconciliationTableArtifact, SourcePacketItem } from "@docket/domain";
+import type { IssueAnalysisArtifact, IssueReasoningPacket, ReconciliationTableArtifact, SourcePacketItem } from "@docket/domain";
 
 type Message = {
   id: string;
@@ -35,13 +35,17 @@ type MemoIssue = {
   sourceIds: string[];
   citationIds: string[];
   situationMode: string;
+  verifiedFactCount: number;
+  claimCount: number;
+  authorityCount: number;
+  assumptionsToAvoid: string[];
 };
 
 function packetLabel(packetById: Map<string, SourcePacketItem>, id: string): string {
   return packetById.get(id)?.label ?? id;
 }
 
-function artifactIssueToMemoIssue(issue: IssueAnalysisArtifact, packetById: Map<string, SourcePacketItem>): MemoIssue {
+function artifactIssueToMemoIssue(issue: IssueAnalysisArtifact, packetById: Map<string, SourcePacketItem>, issuePacket?: IssueReasoningPacket): MemoIssue {
   const authorityLabels = issue.authoritySourcePacketIds.map((id) => packetLabel(packetById, id));
   const sourceLabels = [...issue.claimSourcePacketIds, ...issue.authoritySourcePacketIds].map((id) => packetLabel(packetById, id));
   return {
@@ -51,16 +55,45 @@ function artifactIssueToMemoIssue(issue: IssueAnalysisArtifact, packetById: Map<
     factPatternSummary: issue.factPatternSummary,
     ruleSpace: authorityLabels.length ? authorityLabels : ["Evidence requirements", "Firm review policy"],
     smellTests: issue.smellTests,
-    dollarExposure: "Not estimated yet.",
+    dollarExposure: issuePacket?.reviewGateImpact.falseClearanceRisk ?? "Not estimated yet.",
     professionalJudgment: issue.blocker ? "Treat this as blocking until the missing evidence and reviewer state are cleared." : "Treat this as review-needed before accepting the related position.",
     riskRationale: issue.riskRationale,
-    clearanceStandard: issue.reviewerState === "REVIEWER_APPROVED" ? "Retain evidence and approval in the file." : "Clear only when source evidence, authority, and reviewer approval support the position.",
-    clientQuestionStrategy: issue.missingFacts[0] ?? "Ask the client for the missing fact needed to clear this issue.",
-    clientCommunicationDraft: issue.missingFacts[0] ?? "Please send the missing support so we can finish review.",
-    preparerWorkPlan: issue.preparerTaskIds.length ? issue.preparerTaskIds.map((id) => `Complete ${id.replace(/^task-/, "").replaceAll("-", " ")}.`) : ["Gather source support.", "Document conclusion.", "Route to reviewer."],
+    clearanceStandard: issuePacket?.clearanceStandard ?? (issue.reviewerState === "REVIEWER_APPROVED" ? "Retain evidence and approval in the file." : "Clear only when source evidence, authority, and reviewer approval support the position."),
+    clientQuestionStrategy: issuePacket?.recommendedClientQuestions[0]?.question ?? issue.missingFacts[0] ?? "Ask the client for the missing fact needed to clear this issue.",
+    clientCommunicationDraft: issuePacket?.recommendedClientQuestions[0]?.question ?? issue.missingFacts[0] ?? "Please send the missing support so we can finish review.",
+    preparerWorkPlan: issuePacket?.preparerTasks.map((task) => task.task) ?? (issue.preparerTaskIds.length ? issue.preparerTaskIds.map((id) => `Complete ${id.replace(/^task-/, "").replaceAll("-", " ")}.`) : ["Gather source support.", "Document conclusion.", "Route to reviewer."]),
     sourceIds: sourceLabels,
     citationIds: authorityLabels,
     situationMode: issue.situationMode,
+    verifiedFactCount: issuePacket?.reconstructedFacts.length ?? issue.verifiedFactNodeIds.length,
+    claimCount: issuePacket ? issuePacket.clientClaimPacketIds.length + issuePacket.conversationClaimPacketIds.length : issue.claimSourcePacketIds.length,
+    authorityCount: issuePacket?.authoritySourcePacketIds.length ?? issue.authoritySourcePacketIds.length,
+    assumptionsToAvoid: issuePacket?.assumptionsToAvoid ?? ["Do not treat unsupported claims as verified facts.", "Do not clear from model wording alone."],
+  };
+}
+
+function legacyAnalysisToMemoIssue(analysis: NonNullable<ChatAnswer["professionalAnalyses"]>[number]): MemoIssue {
+  return {
+    issueId: analysis.issueId,
+    title: analysis.title,
+    statusLabel: analysis.statusLabel,
+    factPatternSummary: analysis.factPatternSummary,
+    ruleSpace: analysis.ruleSpace,
+    smellTests: analysis.smellTests,
+    dollarExposure: analysis.dollarExposure,
+    professionalJudgment: analysis.professionalJudgment,
+    riskRationale: analysis.riskRationale,
+    clearanceStandard: analysis.clearanceStandard,
+    clientQuestionStrategy: analysis.clientQuestionStrategy,
+    clientCommunicationDraft: analysis.clientCommunicationDraft,
+    preparerWorkPlan: analysis.preparerWorkPlan,
+    sourceIds: analysis.sourceIds,
+    citationIds: analysis.citationIds,
+    situationMode: analysis.situationMode,
+    verifiedFactCount: analysis.establishedFacts.length,
+    claimCount: analysis.clientClaims.length,
+    authorityCount: analysis.citationIds.length,
+    assumptionsToAvoid: analysis.assumptionsToAvoid,
   };
 }
 
@@ -192,9 +225,10 @@ function ReconciliationTable({ table }: { table: ReconciliationTableArtifact }) 
 function ReasoningTrace({ analysis }: { analysis: MemoIssue }) {
   const steps = [
     ["Classify", analysis.situationMode],
-    ["Reconstruct facts", analysis.factPatternSummary],
+    ["Reconstruct facts", `${analysis.factPatternSummary} Verified facts: ${analysis.verifiedFactCount}; claim packets: ${analysis.claimCount}; authority sources: ${analysis.authorityCount}.`],
     ["Identify rules", analysis.ruleSpace.join("; ")],
     ["Stress test", analysis.smellTests.join("; ")],
+    ["Avoid assumptions", analysis.assumptionsToAvoid.join("; ")],
     ["Defensive check", analysis.clearanceStandard],
     ["Communicate", analysis.clientQuestionStrategy],
   ];
@@ -218,8 +252,10 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
   const { answer, sourceIndex } = response;
   const artifactMemo = answer.artifacts?.memo;
   const packetById = new Map((answer.artifacts?.sourcePacket ?? []).map((packet) => [packet.id, packet]));
-  const artifactAnalyses = (answer.artifacts?.issueAnalyses ?? []).map((analysis) => artifactIssueToMemoIssue(analysis, packetById));
-  const analyses: MemoIssue[] = artifactAnalyses.length ? artifactAnalyses : answer.professionalAnalyses ?? [];
+  const issuePacketByIssueId = new Map((answer.artifacts?.issuePackets ?? []).map((packet) => [packet.issueId, packet]));
+  const artifactAnalyses = (answer.artifacts?.issueAnalyses ?? []).map((analysis) => artifactIssueToMemoIssue(analysis, packetById, issuePacketByIssueId.get(analysis.issueId)));
+  const legacyAnalyses = (answer.professionalAnalyses ?? []).map(legacyAnalysisToMemoIssue);
+  const analyses: MemoIssue[] = artifactAnalyses.length ? artifactAnalyses : legacyAnalyses;
   const reconciliationByIssue = new Map(
     (answer.artifacts?.reconciliationTables ?? []).map((table) => [table.relatedIssueId ?? "return", table]),
   );

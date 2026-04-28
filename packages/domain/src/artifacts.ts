@@ -114,6 +114,62 @@ export const CitationArtifactSchema = z.object({
 });
 export type CitationArtifact = z.infer<typeof CitationArtifactSchema>;
 
+export const IssueReasoningPacketSchema = z.object({
+  id: z.string().min(1),
+  issueId: z.string().min(1),
+  title: z.string().min(1),
+  situationClassification: z.object({
+    mode: z.string().min(1),
+    taxYear: z.number().int(),
+    jurisdiction: z.string().min(1),
+    returnType: z.string().min(1),
+    riskLevel: RiskLevelSchema,
+    blocker: z.boolean(),
+  }),
+  reconstructedFacts: z.array(
+    z.object({
+      factNodeId: z.string().min(1),
+      label: z.string().min(1),
+      value: z.union([z.string(), z.number(), z.boolean()]),
+      reviewerState: ReviewerStateSchema,
+      sourcePacketIds: z.array(z.string()),
+    }),
+  ),
+  verifiedFactNodeIds: z.array(z.string()),
+  clientClaimPacketIds: z.array(z.string()),
+  conversationClaimPacketIds: z.array(z.string()),
+  documentEvidencePacketIds: z.array(z.string()),
+  authoritySourcePacketIds: z.array(z.string()),
+  priorYearPatternPacketIds: z.array(z.string()),
+  missingFacts: z.array(z.string()),
+  evidencePacketIds: z.array(z.string()),
+  smellTests: z.array(z.string()),
+  reviewGateImpact: z.object({
+    blocksReadyToFile: z.boolean(),
+    readyToFileBlockers: z.array(z.string()),
+    materiality: MaterialitySchema,
+    falseClearanceRisk: z.string().min(1),
+  }),
+  recommendedClientQuestions: z.array(
+    z.object({
+      id: z.string().min(1),
+      question: z.string().min(1),
+      sourcePacketIds: z.array(z.string()),
+    }),
+  ),
+  preparerTasks: z.array(
+    z.object({
+      id: z.string().min(1),
+      task: z.string().min(1),
+      sourcePacketIds: z.array(z.string()),
+    }),
+  ),
+  clearanceStandard: z.string().min(1),
+  assumptionsToAvoid: z.array(z.string()),
+  confidence: ArtifactConfidenceSchema,
+});
+export type IssueReasoningPacket = z.infer<typeof IssueReasoningPacketSchema>;
+
 export const ReconciliationTableArtifactSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -225,6 +281,7 @@ export const ChatArtifactEnvelopeSchema = z.object({
   immutableContentHash: z.string().min(1),
   sourcePacket: z.array(SourcePacketItemSchema),
   factGraph: z.array(FactNodeSchema),
+  issuePackets: z.array(IssueReasoningPacketSchema),
   memo: MemoArtifactSchema.nullable(),
   issueAnalyses: z.array(IssueAnalysisArtifactSchema),
   citations: z.array(CitationArtifactSchema),

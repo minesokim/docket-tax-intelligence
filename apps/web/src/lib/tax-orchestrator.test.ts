@@ -17,6 +17,15 @@ describe("tax chat orchestrator artifacts", () => {
     expect(response.answer.artifacts?.memo?.verdict.filingStatus).toBe("Not ready to file");
     expect(response.answer.artifacts?.memo?.verdict.blockerCount).toBeGreaterThan(0);
     expect(response.answer.artifacts?.issueAnalyses.length).toBeGreaterThan(0);
+    expect(response.answer.artifacts?.issuePackets.length).toBeGreaterThan(0);
+    expect(response.answer.artifacts?.issuePackets[0]).toEqual(
+      expect.objectContaining({
+        clearanceStandard: expect.stringContaining("Clear only"),
+        reviewGateImpact: expect.objectContaining({
+          blocksReadyToFile: true,
+        }),
+      }),
+    );
     expect(response.answer.artifacts?.sourcePacket.length).toBeGreaterThan(10);
     expect(response.answer.artifacts?.sourcePacket[0]).toHaveProperty("reliability");
     expect(response.answer.artifacts?.factGraph.length).toBeGreaterThan(0);
@@ -35,6 +44,17 @@ describe("tax chat orchestrator artifacts", () => {
           title: "Marketplace coverage mentioned with no 1095-A",
           blocker: true,
           reviewerState: "NEEDS_EVIDENCE",
+        }),
+      ]),
+    );
+    expect(response.answer.artifacts?.issuePackets).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          issueId: "issue-priya-narayan-marketplace-1095a",
+          missingFacts: expect.arrayContaining(["Request Form 1095-A before finalizing ACA-related return items."]),
+          authoritySourcePacketIds: expect.arrayContaining([
+            "packet-tax_citation-cite-form1095a-marketplace",
+          ]),
         }),
       ]),
     );

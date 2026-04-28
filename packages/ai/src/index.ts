@@ -220,6 +220,105 @@ function asTaxArtifactSynthesisOutput(value: unknown, input: TaxArtifactSynthesi
   return { provider: "claude_code_cli", model: "claude-code-cli", envelope };
 }
 
+function compactEnvelopeForModel(envelope: ChatArtifactEnvelope) {
+  const referencedPacketIds = new Set<string>();
+  for (const packet of envelope.sourcePacket) {
+    if (packet.sourceType === "client" || packet.sourceType === "review_gate") referencedPacketIds.add(packet.id);
+  }
+  for (const issuePacket of envelope.issuePackets) {
+    for (const id of issuePacket.evidencePacketIds) referencedPacketIds.add(id);
+    for (const id of issuePacket.authoritySourcePacketIds) referencedPacketIds.add(id);
+    for (const id of issuePacket.clientClaimPacketIds) referencedPacketIds.add(id);
+    for (const id of issuePacket.conversationClaimPacketIds) referencedPacketIds.add(id);
+    for (const id of issuePacket.documentEvidencePacketIds) referencedPacketIds.add(id);
+    for (const id of issuePacket.priorYearPatternPacketIds) referencedPacketIds.add(id);
+  }
+  for (const citation of envelope.citations) referencedPacketIds.add(citation.sourcePacketId);
+
+  return {
+    id: envelope.id,
+    intent: envelope.intent,
+    clientId: envelope.clientId,
+    taxReturnId: envelope.taxReturnId,
+    sourcePacket: envelope.sourcePacket
+      .filter((packet) => referencedPacketIds.has(packet.id))
+      .map((packet) => ({
+        id: packet.id,
+        sourceType: packet.sourceType,
+        label: packet.label,
+        excerpt: packet.excerpt.length > 500 ? `${packet.excerpt.slice(0, 500)}...` : packet.excerpt,
+        reliability: packet.reliability,
+        authorityLevel: packet.authorityLevel,
+        taxYear: packet.taxYear,
+        jurisdiction: packet.jurisdiction,
+        sourceDate: packet.sourceDate,
+        retrievedAt: packet.retrievedAt,
+      })),
+    factGraph: envelope.factGraph.map((fact) => ({
+      id: fact.id,
+      factType: fact.factType,
+      label: fact.label,
+      value: fact.value,
+      status: fact.status,
+      materiality: fact.materiality,
+      reviewerState: fact.reviewerState,
+      sourcePacketIds: fact.sourcePacketIds,
+    })),
+    issuePackets: envelope.issuePackets.map((packet) => ({
+      id: packet.id,
+      issueId: packet.issueId,
+      title: packet.title,
+      situationClassification: packet.situationClassification,
+      reconstructedFacts: packet.reconstructedFacts,
+      verifiedFactNodeIds: packet.verifiedFactNodeIds,
+      clientClaimPacketIds: packet.clientClaimPacketIds,
+      conversationClaimPacketIds: packet.conversationClaimPacketIds,
+      documentEvidencePacketIds: packet.documentEvidencePacketIds,
+      authoritySourcePacketIds: packet.authoritySourcePacketIds,
+      priorYearPatternPacketIds: packet.priorYearPatternPacketIds,
+      missingFacts: packet.missingFacts,
+      smellTests: packet.smellTests,
+      reviewGateImpact: packet.reviewGateImpact,
+      recommendedClientQuestions: packet.recommendedClientQuestions,
+      preparerTasks: packet.preparerTasks,
+      clearanceStandard: packet.clearanceStandard,
+      assumptionsToAvoid: packet.assumptionsToAvoid,
+    })),
+    memo: envelope.memo ? {
+      id: envelope.memo.id,
+      headline: envelope.memo.headline,
+      paragraphs: envelope.memo.paragraphs,
+      verdict: envelope.memo.verdict,
+      issueAnalysisIds: envelope.memo.issueAnalysisIds,
+      citationIds: envelope.memo.citationIds,
+      confidence: envelope.memo.confidence,
+    } : null,
+    issueAnalyses: envelope.issueAnalyses.map((analysis) => ({
+      id: analysis.id,
+      issueId: analysis.issueId,
+      title: analysis.title,
+      riskLevel: analysis.riskLevel,
+      blocker: analysis.blocker,
+      reviewerState: analysis.reviewerState,
+      situationMode: analysis.situationMode,
+      factPatternSummary: analysis.factPatternSummary,
+      verifiedFactNodeIds: analysis.verifiedFactNodeIds,
+      claimSourcePacketIds: analysis.claimSourcePacketIds,
+      missingFacts: analysis.missingFacts,
+      authoritySourcePacketIds: analysis.authoritySourcePacketIds,
+      smellTests: analysis.smellTests,
+      riskRationale: analysis.riskRationale,
+      clientQuestionIds: analysis.clientQuestionIds,
+      preparerTaskIds: analysis.preparerTaskIds,
+      workpaperIds: analysis.workpaperIds,
+      citationIds: analysis.citationIds,
+      confidence: analysis.confidence,
+    })),
+    citations: envelope.citations,
+    confidence: envelope.confidence,
+  };
+}
+
 function runClaudeCodeCli(task: AIWorkflowTask, outputSchema: unknown, cliPath: string): unknown {
   const prompt = [
     "You are running as Docket's local Claude Code CLI provider.",
@@ -331,17 +430,18 @@ export function synthesizeTaxArtifactsWithClaude(input: TaxArtifactSynthesisInpu
   const prompt = [
     "You are Docket AI, an enrolled-agent-grade tax intelligence synthesizer for professional preparers.",
     "You receive deterministic source packets, fact graph nodes, review gates, and draft artifacts from Docket tools.",
+    "The deterministicEnvelope.issuePackets array is the authoritative EA reasoning packet. Synthesize from it first: classify situation, facts, claims, evidence, authority, missing facts, smell tests, review gate impact, client questions, preparer tasks, and clearance standard.",
     "You may improve the memo prose, issue analyses, client questions, preparer tasks, and workpapers, but you must not invent facts, citations, source IDs, approvals, or filing clearance.",
     "Use only IDs already present in the deterministicEnvelope. If authority is weak or missing, say what authority is missing instead of filling from memory.",
     "Do not expose hidden chain-of-thought. Use concise reviewer-facing rationale, issue-specific smell tests, and source-backed next actions.",
-    "Return JSON only. Return a patch object with any of these optional top-level keys: memo, issueAnalyses, citations, reconciliationTables, clientQuestions, preparerTasks, workpapers, confidence.",
+    "Return JSON only. Prefer returning only { memo, issueAnalyses, confidence }. Include other keys only if truly needed.",
     "Every returned object must keep the same schema and IDs as the deterministic artifact it replaces. Do not include sourcePacket, factGraph, trace, immutableContentHash, clientId, or taxReturnId.",
     "Input:",
     JSON.stringify(
       {
         question: input.question,
         conversationHistory: input.conversationHistory?.slice(-8) ?? [],
-        deterministicEnvelope: input.deterministicEnvelope,
+        deterministicEnvelope: compactEnvelopeForModel(input.deterministicEnvelope),
       },
       null,
       2,
