@@ -6,6 +6,7 @@ import {
   reviewStateFromStatus,
   type ChatArtifactEnvelope,
   type FactNode,
+  type SourceReliabilityBand,
   type SourcePacketItem,
 } from "./artifacts";
 import { evaluateReviewGate, scoreExtensionRisk, scoreReadiness } from "./engines";
@@ -37,6 +38,13 @@ function sourceReliabilityForType(type: SourcePacketItem["sourceType"]): number 
   return 0.55;
 }
 
+function reliabilityBand(score: number): SourceReliabilityBand {
+  if (score >= 0.92) return "very_high";
+  if (score >= 0.8) return "high";
+  if (score >= 0.6) return "medium";
+  return "low";
+}
+
 function sourcePacketItem(input: {
   id: string;
   sourceType: SourcePacketItem["sourceType"];
@@ -52,6 +60,7 @@ function sourcePacketItem(input: {
   evidenceRefIds?: string[];
   retrievalConfidence?: number;
 }): SourcePacketItem {
+  const sourceReliability = sourceReliabilityForType(input.sourceType);
   return {
     id: packetId(input.sourceType, input.id),
     sourceType: input.sourceType,
@@ -65,7 +74,8 @@ function sourcePacketItem(input: {
     jurisdiction: input.jurisdiction ?? null,
     authorityTier: input.authorityTier ?? (input.sourceType === "tax_authority" || input.sourceType === "tax_citation" ? "OFFICIAL_INTERPRETIVE" : "CLIENT_EVIDENCE"),
     authorityLevel: input.authorityLevel ?? null,
-    sourceReliability: sourceReliabilityForType(input.sourceType),
+    reliability: reliabilityBand(sourceReliability),
+    sourceReliability,
     recencyConfidence: freshnessForDate(input.sourceDate),
     retrievalConfidence: input.retrievalConfidence ?? 0.82,
     evidenceRefIds: input.evidenceRefIds ?? [],
@@ -316,8 +326,11 @@ export function buildReturnFactGraph(returnId: string, sourcePacket: SourcePacke
 }
 
 export function searchReturnSourcePacket(returnId: string, query: string, data: DocketData = readDocketData()): SourcePacketItem[] {
+  return searchPacketsByQuery(buildReturnSourcePacket(returnId, data), query);
+}
+
+function searchPacketsByQuery(packets: SourcePacketItem[], query: string): SourcePacketItem[] {
   const terms = query.toLowerCase().split(/\W+/).filter((term) => term.length > 2);
-  const packets = buildReturnSourcePacket(returnId, data);
   if (terms.length === 0) return packets;
   return packets
     .map((packet) => {
@@ -330,14 +343,61 @@ export function searchReturnSourcePacket(returnId: string, query: string, data: 
     .map((item) => item.packet);
 }
 
+function filterReturnPackets(returnId: string, query: string, sourceTypes: SourcePacketItem["sourceType"][], data: DocketData = readDocketData()): SourcePacketItem[] {
+  const packets = buildReturnSourcePacket(returnId, data).filter((packet) => sourceTypes.includes(packet.sourceType));
+  return searchPacketsByQuery(packets, query);
+}
+
+export function searchTaxFacts(returnId: string, query: string, data: DocketData = readDocketData()): SourcePacketItem[] {
+  return filterReturnPackets(returnId, query, ["tax_fact"], data);
+}
+
+export function searchDocuments(returnId: string, query: string, data: DocketData = readDocketData()): SourcePacketItem[] {
+  return filterReturnPackets(returnId, query, ["document"], data);
+}
+
+export function searchIssues(returnId: string, query: string, data: DocketData = readDocketData()): SourcePacketItem[] {
+  return filterReturnPackets(returnId, query, ["issue", "missing_document"], data);
+}
+
+export function searchWorkpapers(returnId: string, query: string, data: DocketData = readDocketData()): SourcePacketItem[] {
+  return filterReturnPackets(returnId, query, ["workpaper"], data);
+}
+
+export function searchConversations(returnId: string, query: string, data: DocketData = readDocketData()): SourcePacketItem[] {
+  return filterReturnPackets(returnId, query, ["conversation", "client_claim", "client_question"], data);
+}
+
+export function searchPriorYearPatterns(returnId: string, query: string, data: DocketData = readDocketData()): SourcePacketItem[] {
+  return filterReturnPackets(returnId, query, ["prior_year_pattern"], data);
+}
+
+export function retrieveAuthority(topic: string, taxYear?: number | null, jurisdiction = "US", data: DocketData = readDocketData()): SourcePacketItem[] {
+  const authorityPackets = [
+    ...data.taxCitations.map((citation) => citationPacket(citation, data.taxAuthoritySources.find((source) => source.id === citation.sourceId))),
+    ...data.taxAuthoritySources.map((source) => authorityPacket(source)),
+  ].filter((packet) => {
+    if (packet.jurisdiction && packet.jurisdiction !== jurisdiction) return false;
+    if (taxYear && packet.taxYear && packet.taxYear !== taxYear) return false;
+    return true;
+  });
+  return searchPacketsByQuery(authorityPackets, topic).slice(0, 8);
+}
+
 export function contentHashForEnvelope(input: Omit<ChatArtifactEnvelope, "immutableContentHash">): string {
   return createHash("sha256").update(JSON.stringify(input)).digest("hex");
 }
 
-export function getClientFileTool(returnId: string, data: DocketData = readDocketData()) {
+export function getClientFile(identifier: { returnId?: string; clientId?: string } | string, data: DocketData = readDocketData()) {
+  const returnId = typeof identifier === "string"
+    ? identifier
+    : identifier.returnId ?? data.taxReturns.find((taxReturn) => taxReturn.clientId === identifier.clientId)?.id;
+  if (!returnId) return null;
   const workbench = getReturnWorkbench(returnId, data);
   if (!workbench) return null;
   const sourcePacket = buildReturnSourcePacket(returnId, data);
   const factGraph = buildReturnFactGraph(returnId, sourcePacket, data);
   return { workbench, sourcePacket, factGraph };
 }
+
+export const getClientFileTool = getClientFile;

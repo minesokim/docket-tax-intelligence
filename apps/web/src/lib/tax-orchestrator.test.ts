@@ -18,6 +18,7 @@ describe("tax chat orchestrator artifacts", () => {
     expect(response.answer.artifacts?.memo?.verdict.blockerCount).toBeGreaterThan(0);
     expect(response.answer.artifacts?.issueAnalyses.length).toBeGreaterThan(0);
     expect(response.answer.artifacts?.sourcePacket.length).toBeGreaterThan(10);
+    expect(response.answer.artifacts?.sourcePacket[0]).toHaveProperty("reliability");
     expect(response.answer.artifacts?.factGraph.length).toBeGreaterThan(0);
     expect(response.answer.artifacts?.trace.map((event) => event.stage)).toContain("validation");
     expect(response.answer.artifacts?.immutableContentHash).toMatch(/^[a-f0-9]{64}$/);
@@ -42,6 +43,7 @@ describe("tax chat orchestrator artifacts", () => {
         expect.objectContaining({
           sourceType: "missing_document",
           label: "FORM 1095 A",
+          reliability: "low",
         }),
         expect.objectContaining({
           sourceType: "tax_citation",

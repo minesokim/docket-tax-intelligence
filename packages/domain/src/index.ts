@@ -3,5 +3,6 @@ export * from "./artifacts";
 export * from "./seed";
 export * from "./engines";
 export * from "./retrieval";
+export * from "./tools";
 export * from "./selectors";
 export * from "./store";

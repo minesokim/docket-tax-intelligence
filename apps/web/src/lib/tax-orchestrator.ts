@@ -1,9 +1,9 @@
+import { synthesizeTaxArtifactsWithClaude } from "@docket/ai";
 import {
   ChatArtifactEnvelopeSchema,
   artifactConfidence,
   contentHashForEnvelope,
-  getClientFileTool,
-  searchReturnSourcePacket,
+  docketTools,
   type ChatArtifactEnvelope,
   type CitationArtifact,
   type IssueAnalysisArtifact,
@@ -23,7 +23,7 @@ type OrchestratorInput = {
   returnId: string;
   history: ChatHistoryTurn[];
 };
-type ClientFile = NonNullable<ReturnType<typeof getClientFileTool>>;
+type ClientFile = NonNullable<ReturnType<typeof docketTools.getClientFile>>;
 type OrchestratorWorkbench = ClientFile["workbench"];
 type OrchestratorIssue = OrchestratorWorkbench["issues"][number];
 
@@ -108,32 +108,8 @@ function buildCitations(sourcePacket: SourcePacketItem[]): CitationArtifact[] {
 }
 
 function buildReconciliationTables(returnId: string, issueIds: string[]): ReconciliationTableArtifact[] {
-  const packets = searchReturnSourcePacket(returnId, "gross receipts income 1099 nec 1099 k client claim");
-  const rows = packets
-    .filter((packet) => packet.sourceType === "tax_fact" || packet.sourceType === "client_claim" || packet.sourceType === "document")
-    .slice(0, 8)
-    .map((packet) => ({
-      id: `row-${packet.sourceId}`,
-      cells: [packet.label, packet.excerpt, packet.sourceType.replaceAll("_", " ")],
-      sourcePacketIds: [packet.id],
-      status: packet.sourceType === "client_claim" ? ("UNRESOLVED" as const) : ("MATCHED" as const),
-    }));
-  if (rows.length === 0) return [];
-  return [
-    {
-      id: `recon-${returnId}-income`,
-      title: "Income and source reconciliation",
-      relatedIssueId: issueIds[0] ?? null,
-      columns: ["Source", "Evidence", "Type"],
-      rows,
-      confidence: artifactConfidence("Reconciliation table is built from retrieved client-file packets, not UI hardcoding.", {
-        overall: 0.76,
-        sourceSupport: 0.8,
-        retrievalConfidence: 0.82,
-        authorityFit: 0.65,
-      }),
-    },
-  ];
+  const table = docketTools.buildReconciliationTable(returnId, "gross receipts income 1099 nec 1099 k client claim", issueIds[0] ?? null);
+  return table ? [table] : [];
 }
 
 function selectRelevantSourcePacket(
@@ -176,7 +152,7 @@ function selectRelevantSourcePacket(
 }
 
 export function runTaxChatOrchestrator(input: OrchestratorInput): ChatArtifactEnvelope {
-  const clientFile = getClientFileTool(input.returnId);
+  const clientFile = docketTools.getClientFile({ returnId: input.returnId });
   if (!clientFile) throw new Error(`No return found for orchestrator returnId ${input.returnId}`);
 
   const { workbench, sourcePacket: fullSourcePacket, factGraph } = clientFile;
@@ -187,21 +163,19 @@ export function runTaxChatOrchestrator(input: OrchestratorInput): ChatArtifactEn
   const traces: OrchestrationTraceEvent[] = [
     trace("intent", `Classified prompt as ${intent}.`, null, input.question),
     trace("context", `Loaded ${workbench.client?.displayName ?? "client"} return context.`, "getClientFile", input.returnId, sourcePacket.slice(0, 6).map((packet) => packet.id)),
-    trace("retrieval", `Retrieved ${sourcePacket.length} source packet item(s) and ${factGraph.length} fact node(s).`, "searchReturnSourcePacket", input.question, sourcePacket.slice(0, 12).map((packet) => packet.id)),
+    trace("retrieval", `Retrieved ${sourcePacket.length} source packet item(s) and ${factGraph.length} fact node(s).`, "docketTools", input.question, sourcePacket.slice(0, 12).map((packet) => packet.id)),
   ];
 
-  const preparerTasks: PreparerTaskArtifact[] = selectedIssues.map((issue, index) => ({
-    id: `task-${issue.id}`,
-    relatedIssueId: issue.id,
-    task: issue.recommendedAction,
-    sourcePacketIds: sourceIdsForIssue(issue.sourceIds, sourcePacket),
-    priority: index + 1,
-    confidence: artifactConfidence("Preparer task is derived directly from the active issue recommended action.", {
-      overall: issue.blocker ? 0.84 : 0.74,
-      sourceSupport: issue.sourceIds.length ? 0.8 : 0.55,
-      reviewState: issue.blocker ? "NEEDS_EVIDENCE" : "UNREVIEWED",
+  const preparerTasks: PreparerTaskArtifact[] = selectedIssues.map((issue, index) =>
+    docketTools.createPreparerTask({
+      id: `task-${issue.id}`,
+      relatedIssueId: issue.id,
+      task: issue.recommendedAction,
+      sourcePacketIds: sourceIdsForIssue(issue.sourceIds, sourcePacket),
+      priority: index + 1,
+      blocker: issue.blocker,
     }),
-  }));
+  );
 
   const issueAnalyses: IssueAnalysisArtifact[] = selectedIssues.map((issue, index) => {
     const issuePacketIds = sourceIdsForIssue(issue.sourceIds, sourcePacket);
@@ -244,61 +218,56 @@ export function runTaxChatOrchestrator(input: OrchestratorInput): ChatArtifactEn
 
   const clientQuestions = workbench.questions
     .filter((question) => selectedIssues.some((issue) => issue.id === question.relatedIssueId))
-    .map((question) => ({
-      id: `question-${question.id}`,
-      relatedIssueId: question.relatedIssueId,
-      question: question.question,
-      reason: question.relatedIssueId ? "Question is tied to a selected issue artifact." : "Question supports return context completion.",
-      sourcePacketIds: sourceIdsForIssue(question.evidenceRefs.map((evidence) => evidence.sourceId), sourcePacket),
-      reviewerState: question.reviewerApproved ? ("PREPARER_READY" as const) : ("UNREVIEWED" as const),
-      confidence: artifactConfidence("Client question is generated from stored clarification state and issue linkage.", {
-        overall: question.reviewerApproved ? 0.82 : 0.65,
-        sourceSupport: question.evidenceRefs.length ? 0.8 : 0.45,
-        reviewState: question.reviewerApproved ? "PREPARER_READY" : "UNREVIEWED",
+    .map((question) =>
+      docketTools.createClientQuestion({
+        id: `question-${question.id}`,
+        relatedIssueId: question.relatedIssueId,
+        question: question.question,
+        reason: question.relatedIssueId ? "Question is tied to a selected issue artifact." : "Question supports return context completion.",
+        sourcePacketIds: sourceIdsForIssue(question.evidenceRefs.map((evidence) => evidence.sourceId), sourcePacket),
+        reviewerApproved: question.reviewerApproved,
       }),
-    }));
+    );
 
-  const workpapers: WorkpaperArtifact[] = workbench.workpapers.map((workpaper) => ({
-    id: `workpaper-${workpaper.id}`,
-    title: workpaper.title,
-    section: workpaper.section,
-    body: workpaper.body,
-    sourcePacketIds: sourceIdsForIssue(workpaper.evidenceRefIds, sourcePacket),
-    reviewerState: workpaper.status === "APPROVED" ? "REVIEWER_APPROVED" : workpaper.status === "READY_FOR_REVIEW" ? "PREPARER_READY" : "UNREVIEWED",
-    confidence: artifactConfidence("Workpaper artifact is copied from stored workpaper state with evidence references.", {
-      overall: workpaper.status === "APPROVED" ? 0.9 : 0.72,
-      sourceSupport: workpaper.evidenceRefIds.length ? 0.78 : 0.45,
-      reviewState: workpaper.status === "APPROVED" ? "REVIEWER_APPROVED" : "PREPARER_READY",
+  const workpapers: WorkpaperArtifact[] = workbench.workpapers.map((workpaper) =>
+    docketTools.createWorkpaper({
+      id: `workpaper-${workpaper.id}`,
+      title: workpaper.title,
+      section: workpaper.section,
+      body: workpaper.body,
+      sourcePacketIds: sourceIdsForIssue(workpaper.evidenceRefIds, sourcePacket),
+      approved: workpaper.status === "APPROVED",
     }),
-  }));
+  );
 
   const citations = buildCitations(sourcePacket);
   const reconciliationTables = intent === "reconciliation" || selectedIssues.some((issue) => /INCOME|1099/i.test(issue.issueType))
     ? buildReconciliationTables(input.returnId, selectedIssues.map((issue) => issue.id))
     : [];
-  traces.push(trace("cross_issue_checks", `Review gate pass=${workbench.readyToFileGate.pass}; blocker count=${workbench.readyToFileGate.blockers.length}.`, "runReviewGateCheck", input.returnId, sourcePacket.filter((packet) => packet.sourceType === "review_gate").map((packet) => packet.id)));
+  const readyToFileGate = docketTools.runReviewGateCheck(input.returnId);
+  traces.push(trace("cross_issue_checks", `Review gate pass=${readyToFileGate.pass}; blocker count=${readyToFileGate.blockers.length}.`, "runReviewGateCheck", input.returnId, sourcePacket.filter((packet) => packet.sourceType === "review_gate").map((packet) => packet.id)));
 
   const memo = intent === "deep_memo"
     ? {
         id: `memo-${input.returnId}-${Date.now()}`,
-        headline: workbench.readyToFileGate.pass ? `${workbench.client?.displayName ?? "Client"} is clear in current Docket state.` : `${workbench.client?.displayName ?? "Client"}'s return is not ready to file.`,
+        headline: readyToFileGate.pass ? `${workbench.client?.displayName ?? "Client"} is clear in current Docket state.` : `${workbench.client?.displayName ?? "Client"}'s return is not ready to file.`,
         paragraphs: [
           `${workbench.client?.displayName ?? "Client"} is in ${workbench.taxReturn.status.replaceAll("_", " ").toLowerCase()} status with ${workbench.readiness.readinessScore}% workflow readiness and ${workbench.extension.extensionRiskScore}% extension risk.`,
           `Active issues analyzed: ${selectedIssues.map((issue) => issue.title).join("; ") || "none"}.`,
-          `Ready-to-file gate blockers: ${workbench.readyToFileGate.blockers.join("; ") || "none"}.`,
+          `Ready-to-file gate blockers: ${readyToFileGate.blockers.join("; ") || "none"}.`,
         ],
         verdict: {
-          filingStatus: workbench.readyToFileGate.pass ? "Ready-to-file stub passed" : "Not ready to file",
+          filingStatus: readyToFileGate.pass ? "Ready-to-file stub passed" : "Not ready to file",
           readinessScore: workbench.readiness.readinessScore,
           extensionRiskScore: workbench.extension.extensionRiskScore,
-          blockerCount: workbench.readyToFileGate.blockers.length,
+          blockerCount: readyToFileGate.blockers.length,
         },
         issueAnalysisIds: issueAnalyses.map((analysis) => analysis.id),
         citationIds: citations.slice(0, 5).map((citation) => citation.id),
         confidence: artifactConfidence("Memo verdict is a rollup of review gates, issue artifacts, and readiness/extension scoring.", {
-          overall: workbench.readyToFileGate.pass ? 0.82 : 0.88,
+          overall: readyToFileGate.pass ? 0.82 : 0.88,
           sourceSupport: sourcePacket.length > 0 ? 0.82 : 0.4,
-          reviewState: workbench.readyToFileGate.pass ? "PREPARER_READY" : "NEEDS_EVIDENCE",
+          reviewState: readyToFileGate.pass ? "PREPARER_READY" : "NEEDS_EVIDENCE",
         }),
       }
     : null;
@@ -325,7 +294,7 @@ export function runTaxChatOrchestrator(input: OrchestratorInput): ChatArtifactEn
       sourceSupport: sourcePacket.length > 0 ? 0.8 : 0.3,
       retrievalConfidence: 0.85,
       authorityFit: citations.length ? 0.72 : 0.45,
-      reviewState: workbench.readyToFileGate.pass ? "PREPARER_READY" : "NEEDS_EVIDENCE",
+      reviewState: readyToFileGate.pass ? "PREPARER_READY" : "NEEDS_EVIDENCE",
     }),
   };
   const parsed = ChatArtifactEnvelopeSchema.parse({
@@ -333,5 +302,10 @@ export function runTaxChatOrchestrator(input: OrchestratorInput): ChatArtifactEn
     immutableContentHash: contentHashForEnvelope(envelopeWithoutHash),
     trace: [...traces, trace("validation", "Validated artifact envelope with Zod and attached immutable content hash.", null, null)],
   });
-  return parsed;
+  const synthesis = synthesizeTaxArtifactsWithClaude({
+    question: input.question,
+    conversationHistory: input.history,
+    deterministicEnvelope: parsed,
+  });
+  return synthesis?.envelope ?? parsed;
 }

@@ -39,6 +39,9 @@ export const RetrievalSourceTypeSchema = z.enum([
 ]);
 export type RetrievalSourceType = z.infer<typeof RetrievalSourceTypeSchema>;
 
+export const SourceReliabilityBandSchema = z.enum(["very_high", "high", "medium", "low"]);
+export type SourceReliabilityBand = z.infer<typeof SourceReliabilityBandSchema>;
+
 export const ReviewerStateSchema = z.enum([
   "UNREVIEWED",
   "NEEDS_EVIDENCE",
@@ -75,6 +78,7 @@ export const SourcePacketItemSchema = z.object({
   jurisdiction: z.string().nullable(),
   authorityTier: SourceAuthorityTierSchema,
   authorityLevel: AuthorityLevelSchema.nullable(),
+  reliability: SourceReliabilityBandSchema,
   sourceReliability: z.number().min(0).max(1),
   recencyConfidence: z.number().min(0).max(1),
   retrievalConfidence: z.number().min(0).max(1),
@@ -232,6 +236,18 @@ export const ChatArtifactEnvelopeSchema = z.object({
   confidence: ArtifactConfidenceSchema,
 });
 export type ChatArtifactEnvelope = z.infer<typeof ChatArtifactEnvelopeSchema>;
+
+export const ChatArtifactPatchSchema = z.object({
+  memo: MemoArtifactSchema.nullable().optional(),
+  issueAnalyses: z.array(IssueAnalysisArtifactSchema).optional(),
+  citations: z.array(CitationArtifactSchema).optional(),
+  reconciliationTables: z.array(ReconciliationTableArtifactSchema).optional(),
+  clientQuestions: z.array(ClientQuestionArtifactSchema).optional(),
+  preparerTasks: z.array(PreparerTaskArtifactSchema).optional(),
+  workpapers: z.array(WorkpaperArtifactSchema).optional(),
+  confidence: ArtifactConfidenceSchema.optional(),
+});
+export type ChatArtifactPatch = z.infer<typeof ChatArtifactPatchSchema>;
 
 export function artifactConfidence(
   rationale: string,

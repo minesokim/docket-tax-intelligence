@@ -1,6 +1,15 @@
 import { execFileSync, spawnSync } from "node:child_process";
 
-import { createMockAIReasoningRun, type AIReasoningRun, type AIWorkflowTask, type DocketData } from "@docket/domain";
+import {
+  ChatArtifactEnvelopeSchema,
+  ChatArtifactPatchSchema,
+  contentHashForEnvelope,
+  createMockAIReasoningRun,
+  type AIReasoningRun,
+  type AIWorkflowTask,
+  type ChatArtifactEnvelope,
+  type DocketData,
+} from "@docket/domain";
 
 export type ModelProviderName = "mock" | "openai" | "anthropic" | "claude_code_cli" | "codex_cli" | "other";
 
@@ -50,6 +59,18 @@ export type TaxChatSynthesisOutput = {
   nextSteps: string[];
   suggestedFollowups: string[];
   limitation?: string;
+};
+
+export type TaxArtifactSynthesisInput = {
+  question: string;
+  conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
+  deterministicEnvelope: ChatArtifactEnvelope;
+};
+
+export type TaxArtifactSynthesisOutput = {
+  provider: "claude_code_cli";
+  model: "claude-code-cli";
+  envelope: ChatArtifactEnvelope;
 };
 
 export type ClaudeCodeCliStatus = {
@@ -136,6 +157,67 @@ function asTaxChatSynthesisOutput(value: unknown, fallback: TaxChatSynthesisInpu
   const limitation = typeof candidate.limitation === "string" ? candidate.limitation : fallback.limitation;
   if (limitation) output.limitation = limitation;
   return output;
+}
+
+function extractJsonObject(rawText: string): unknown {
+  const trimmed = rawText.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const candidate = fenced?.[1] ?? trimmed;
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    const start = candidate.indexOf("{");
+    const end = candidate.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(candidate.slice(start, end + 1));
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+function asTaxArtifactSynthesisOutput(value: unknown, input: TaxArtifactSynthesisInput): TaxArtifactSynthesisOutput | null {
+  const parsedValue = value && typeof value === "object" && "rawText" in value && typeof (value as { rawText?: unknown }).rawText === "string"
+    ? extractJsonObject((value as { rawText: string }).rawText)
+    : value;
+  const patch = ChatArtifactPatchSchema.safeParse(parsedValue);
+  if (!patch.success) return null;
+
+  const deterministic = input.deterministicEnvelope;
+  const envelopeWithoutHash = {
+    ...deterministic,
+    memo: patch.data.memo ?? deterministic.memo,
+    issueAnalyses: patch.data.issueAnalyses ?? deterministic.issueAnalyses,
+    citations: patch.data.citations ?? deterministic.citations,
+    reconciliationTables: patch.data.reconciliationTables ?? deterministic.reconciliationTables,
+    clientQuestions: patch.data.clientQuestions ?? deterministic.clientQuestions,
+    preparerTasks: patch.data.preparerTasks ?? deterministic.preparerTasks,
+    workpapers: patch.data.workpapers ?? deterministic.workpapers,
+    confidence: patch.data.confidence ?? deterministic.confidence,
+    trace: [
+      ...deterministic.trace,
+      {
+        id: `trace-synthesis-claude-${Date.now()}`,
+        stage: "synthesis" as const,
+        summary: "Claude Code CLI synthesized validated artifact JSON from deterministic Docket source packets.",
+        toolName: "claude_code_cli",
+        query: input.question,
+        sourcePacketIds: deterministic.sourcePacket.slice(0, 12).map((packet) => packet.id),
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        latencyMs: 0,
+        cacheStatus: "MISS" as const,
+      },
+    ],
+  };
+  const envelope = ChatArtifactEnvelopeSchema.parse({
+    ...envelopeWithoutHash,
+    immutableContentHash: contentHashForEnvelope(envelopeWithoutHash),
+  });
+  return { provider: "claude_code_cli", model: "claude-code-cli", envelope };
 }
 
 function runClaudeCodeCli(task: AIWorkflowTask, outputSchema: unknown, cliPath: string): unknown {
@@ -236,6 +318,43 @@ export function synthesizeTaxChatWithClaude(input: TaxChatSynthesisInput): TaxCh
       maxBuffer: 1024 * 1024,
     });
     return asTaxChatSynthesisOutput(parseCliJson(raw), input.draftAnswer);
+  } catch {
+    return null;
+  }
+}
+
+export function synthesizeTaxArtifactsWithClaude(input: TaxArtifactSynthesisInput): TaxArtifactSynthesisOutput | null {
+  if (process.env.DOCKET_AI_PROVIDER !== "claude_code_cli" || !envFlag("DOCKET_ENABLE_LOCAL_AI_CLI")) {
+    return null;
+  }
+
+  const prompt = [
+    "You are Docket AI, an enrolled-agent-grade tax intelligence synthesizer for professional preparers.",
+    "You receive deterministic source packets, fact graph nodes, review gates, and draft artifacts from Docket tools.",
+    "You may improve the memo prose, issue analyses, client questions, preparer tasks, and workpapers, but you must not invent facts, citations, source IDs, approvals, or filing clearance.",
+    "Use only IDs already present in the deterministicEnvelope. If authority is weak or missing, say what authority is missing instead of filling from memory.",
+    "Do not expose hidden chain-of-thought. Use concise reviewer-facing rationale, issue-specific smell tests, and source-backed next actions.",
+    "Return JSON only. Return a patch object with any of these optional top-level keys: memo, issueAnalyses, citations, reconciliationTables, clientQuestions, preparerTasks, workpapers, confidence.",
+    "Every returned object must keep the same schema and IDs as the deterministic artifact it replaces. Do not include sourcePacket, factGraph, trace, immutableContentHash, clientId, or taxReturnId.",
+    "Input:",
+    JSON.stringify(
+      {
+        question: input.question,
+        conversationHistory: input.conversationHistory?.slice(-8) ?? [],
+        deterministicEnvelope: input.deterministicEnvelope,
+      },
+      null,
+      2,
+    ),
+  ].join("\n\n");
+
+  try {
+    const raw = execFileSync(claudeCliPath(), ["-p", prompt, "--output-format", "json", "--max-turns", "1"], {
+      encoding: "utf8",
+      timeout: 120_000,
+      maxBuffer: 3 * 1024 * 1024,
+    });
+    return asTaxArtifactSynthesisOutput(parseCliJson(raw), input);
   } catch {
     return null;
   }

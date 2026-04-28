@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { StatusBadge } from "../../../src/components/docket-ui";
 import { suggestedQuestions, type ChatAnswer, type ChatHistoryTurn, type SourceIndexEntry, type TaxChatResponse } from "../../../src/lib/tax-chat-shared";
-import type { ReconciliationTableArtifact } from "@docket/domain";
+import type { IssueAnalysisArtifact, ReconciliationTableArtifact, SourcePacketItem } from "@docket/domain";
 
 type Message = {
   id: string;
@@ -16,6 +16,52 @@ type Message = {
 function sourceLabel(id: string, sourceIndex: Record<string, SourceIndexEntry>) {
   const source = sourceIndex[id];
   return source ? `${source.type}: ${source.label}` : id;
+}
+
+type MemoIssue = {
+  issueId: string;
+  title: string;
+  statusLabel: string;
+  factPatternSummary: string;
+  ruleSpace: string[];
+  smellTests: string[];
+  dollarExposure: string;
+  professionalJudgment: string;
+  riskRationale: string;
+  clearanceStandard: string;
+  clientQuestionStrategy: string;
+  clientCommunicationDraft: string;
+  preparerWorkPlan: string[];
+  sourceIds: string[];
+  citationIds: string[];
+  situationMode: string;
+};
+
+function packetLabel(packetById: Map<string, SourcePacketItem>, id: string): string {
+  return packetById.get(id)?.label ?? id;
+}
+
+function artifactIssueToMemoIssue(issue: IssueAnalysisArtifact, packetById: Map<string, SourcePacketItem>): MemoIssue {
+  const authorityLabels = issue.authoritySourcePacketIds.map((id) => packetLabel(packetById, id));
+  const sourceLabels = [...issue.claimSourcePacketIds, ...issue.authoritySourcePacketIds].map((id) => packetLabel(packetById, id));
+  return {
+    issueId: issue.issueId,
+    title: issue.title,
+    statusLabel: issue.blocker ? "Blocks filing until reviewed" : issue.reviewerState === "REVIEWER_APPROVED" ? "Resolved in current state" : "Needs reviewer attention",
+    factPatternSummary: issue.factPatternSummary,
+    ruleSpace: authorityLabels.length ? authorityLabels : ["Evidence requirements", "Firm review policy"],
+    smellTests: issue.smellTests,
+    dollarExposure: "Not estimated yet.",
+    professionalJudgment: issue.blocker ? "Treat this as blocking until the missing evidence and reviewer state are cleared." : "Treat this as review-needed before accepting the related position.",
+    riskRationale: issue.riskRationale,
+    clearanceStandard: issue.reviewerState === "REVIEWER_APPROVED" ? "Retain evidence and approval in the file." : "Clear only when source evidence, authority, and reviewer approval support the position.",
+    clientQuestionStrategy: issue.missingFacts[0] ?? "Ask the client for the missing fact needed to clear this issue.",
+    clientCommunicationDraft: issue.missingFacts[0] ?? "Please send the missing support so we can finish review.",
+    preparerWorkPlan: issue.preparerTaskIds.length ? issue.preparerTaskIds.map((id) => `Complete ${id.replace(/^task-/, "").replaceAll("-", " ")}.`) : ["Gather source support.", "Document conclusion.", "Route to reviewer."],
+    sourceIds: sourceLabels,
+    citationIds: authorityLabels,
+    situationMode: issue.situationMode,
+  };
 }
 
 function SourcePills({ ids, sourceIndex }: { ids: string[]; sourceIndex: Record<string, SourceIndexEntry> }) {
@@ -41,6 +87,21 @@ function CitationChip({ id, sourceIndex }: { id: string; sourceIndex: Record<str
 
 function sourceBuckets(response: TaxChatResponse) {
   const { answer, sourceIndex } = response;
+  if (answer.artifacts?.sourcePacket.length) {
+    const bucketed = {
+      authority: [] as string[],
+      clientFile: [] as string[],
+      conversation: [] as string[],
+      knowledgeGraph: [] as string[],
+    };
+    for (const packet of answer.artifacts.sourcePacket) {
+      if (packet.sourceType === "tax_authority" || packet.sourceType === "tax_citation") bucketed.authority.push(packet.id);
+      else if (packet.sourceType === "conversation" || packet.sourceType === "client_claim") bucketed.conversation.push(packet.id);
+      else if (["document", "tax_fact", "client_question", "workpaper", "missing_document", "issue"].includes(packet.sourceType)) bucketed.clientFile.push(packet.id);
+      else bucketed.knowledgeGraph.push(packet.id);
+    }
+    return bucketed;
+  }
   const ids = Array.from(
     new Set([
       ...answer.sourceIds,
@@ -69,15 +130,17 @@ function sourceBuckets(response: TaxChatResponse) {
 function SourceRail({ response }: { response: TaxChatResponse }) {
   const buckets = sourceBuckets(response);
   const { sourceIndex } = response;
+  const packetById = new Map((response.answer.artifacts?.sourcePacket ?? []).map((packet) => [packet.id, packet]));
   const renderBucket = (title: string, ids: string[]) => (
     <div className="memo-source-bucket" key={title}>
       <div>{title}</div>
       {ids.length > 0 ? (
         ids.slice(0, 12).map((id) => {
           const source = sourceIndex[id];
+          const packet = packetById.get(id);
           return (
-            <a href={`#source-${id}`} id={`source-${id}`} key={`${title}-${id}`} title={source?.detail ?? id}>
-              {source?.label ?? id}
+            <a href={`#source-${id}`} id={`source-${id}`} key={`${title}-${id}`} title={source?.detail ?? packet?.excerpt ?? id}>
+              {source?.label ?? packet?.label ?? id}
             </a>
           );
         })
@@ -126,7 +189,7 @@ function ReconciliationTable({ table }: { table: ReconciliationTableArtifact }) 
   );
 }
 
-function ReasoningTrace({ analysis }: { analysis: NonNullable<ChatAnswer["professionalAnalyses"]>[number] }) {
+function ReasoningTrace({ analysis }: { analysis: MemoIssue }) {
   const steps = [
     ["Classify", analysis.situationMode],
     ["Reconstruct facts", analysis.factPatternSummary],
@@ -153,15 +216,19 @@ function ReasoningTrace({ analysis }: { analysis: NonNullable<ChatAnswer["profes
 
 function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate: boolean }) {
   const { answer, sourceIndex } = response;
-  const analyses = answer.professionalAnalyses ?? [];
+  const artifactMemo = answer.artifacts?.memo;
+  const packetById = new Map((answer.artifacts?.sourcePacket ?? []).map((packet) => [packet.id, packet]));
+  const artifactAnalyses = (answer.artifacts?.issueAnalyses ?? []).map((analysis) => artifactIssueToMemoIssue(analysis, packetById));
+  const analyses: MemoIssue[] = artifactAnalyses.length ? artifactAnalyses : answer.professionalAnalyses ?? [];
   const reconciliationByIssue = new Map(
     (answer.artifacts?.reconciliationTables ?? []).map((table) => [table.relatedIssueId ?? "return", table]),
   );
-  const animatedLead = useTypewriter(answer.answer.join("\n\n"), animate);
+  const animatedLead = useTypewriter((artifactMemo?.paragraphs ?? answer.answer).join("\n\n"), animate);
   const leadParagraphs = animatedLead.split("\n\n").filter(Boolean);
   const issueCount = analyses.length;
   const clientQueue = answer.actionQueues?.clientFacing ?? analyses.map((analysis) => analysis.clientCommunicationDraft);
   const preparerQueue = answer.actionQueues?.preparerFacing ?? analyses.flatMap((analysis) => analysis.preparerWorkPlan);
+  const verdict = artifactMemo?.verdict ?? answer.verdict;
 
   return (
     <article className="chat-message assistant-message memo-message">
@@ -170,16 +237,16 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
         <div className="memo-document">
           <div className="memo-breadcrumb">Clients / {response.contextLabel ?? "Selected return"}</div>
           <header className="memo-header">
-            <h2>{answer.headline}</h2>
+            <h2>{artifactMemo?.headline ?? answer.headline}</h2>
             <p>Memo · Generated just now · Reasoning: {issueCount} issues analyzed · Sources linked inline</p>
           </header>
 
-          {answer.verdict ? (
+          {verdict ? (
             <div className="memo-badges">
-              <span className={answer.verdict.filingStatus.includes("Not") ? "danger" : "success"}>{answer.verdict.filingStatus}</span>
-              <span>{answer.verdict.blockerCount} ready-to-file blocker(s)</span>
-              <span>Readiness: {answer.verdict.readinessScore}%</span>
-              <span>Extension risk: {answer.verdict.extensionRiskScore}%</span>
+              <span className={verdict.filingStatus.includes("Not") ? "danger" : "success"}>{verdict.filingStatus}</span>
+              <span>{verdict.blockerCount} ready-to-file blocker(s)</span>
+              <span>Readiness: {verdict.readinessScore}%</span>
+              <span>Extension risk: {verdict.extensionRiskScore}%</span>
             </div>
           ) : null}
 
@@ -217,7 +284,7 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
 
               <div className="memo-source-chips">
                 {[...analysis.citationIds, ...analysis.sourceIds].slice(0, 8).map((id) => (
-                  <CitationChip id={id} sourceIndex={sourceIndex} key={id} />
+                  sourceIndex[id] ? <CitationChip id={id} sourceIndex={sourceIndex} key={id} /> : <span className="inline-citation" key={id}>{id}</span>
                 ))}
               </div>
 
@@ -292,7 +359,7 @@ function AssistantAnswer({ response, animate }: { response: TaxChatResponse; ani
   const animatedBody = useTypewriter(answer.answer.join("\n\n"), animate);
   const bodyParagraphs = animatedBody.split("\n\n").filter(Boolean);
 
-  if (answer.mode === "client-return" && answer.professionalAnalyses?.length) {
+  if (answer.mode === "client-return" && ((answer.artifacts?.issueAnalyses.length ?? 0) > 0 || answer.professionalAnalyses?.length)) {
     return <MemoAnswer response={response} animate={animate} />;
   }
 
