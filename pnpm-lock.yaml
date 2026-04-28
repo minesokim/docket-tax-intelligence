@@ -243,8 +243,6 @@ importers:
         specifier: workspace:*
         version: link:../domain
 
-  packages/test-utils: {}
-
   packages/ui: {}
 
 packages:

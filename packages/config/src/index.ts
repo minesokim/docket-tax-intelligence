@@ -22,9 +22,7 @@ export const apiEnvSchema = baseEnvSchema.extend({
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().default("http://localhost:4318"),
 });
 
-export const workerEnvSchema = apiEnvSchema.extend({
-  OPENAI_API_KEY: z.string().min(1).optional(),
-});
+export const workerEnvSchema = apiEnvSchema;
 
 export function readWebEnv(input: Record<string, string | undefined> = process.env) {
   return webEnvSchema.parse(input);

@@ -52,9 +52,6 @@
       ],
       "@docket/jobs": [
         "packages/jobs/src/index.ts"
-      ],
-      "@docket/test-utils": [
-        "packages/test-utils/src/index.ts"
       ]
     }
   }
