@@ -352,7 +352,7 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
             <div className="memo-badges">
               <span className={isResearch || isPortfolio ? "warning" : "success"}>{isPortfolio ? "Portfolio mode" : isResearch ? "Research mode" : "Client-file mode"}</span>
               <span>{answer.synthesizedBy ?? "deterministic retrieval"}</span>
-              {answer.retrievedAuthority ? <span>{answer.retrievedAuthority.sources.filter((source) => source.fetchStatus === "LIVE").length} live source(s)</span> : null}
+              {answer.retrievedAuthority ? <span>{answer.retrievedAuthority.sources.filter((source) => source.fetchStatus !== "FAILED").length} authority source(s)</span> : null}
             </div>
           )}
 
@@ -439,7 +439,7 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
                           <h4><a href={source.sourceUrl}>{source.title}</a></h4>
                           <p>{source.publisher} · {source.authorityLevel.replaceAll("_", " ")} · retrieved {source.retrievedAt.slice(0, 10)}</p>
                         </div>
-                        <span className={source.fetchStatus === "LIVE" ? "success" : "danger"}>{source.fetchStatus.toLowerCase()}</span>
+                        <span className={source.fetchStatus === "FAILED" ? "danger" : "success"}>{source.fetchStatus.toLowerCase()}</span>
                       </div>
                       {source.error ? <p className="answer-warning">{source.error}</p> : null}
                       {source.snippets.slice(0, 2).map((snippet) => <blockquote key={snippet}>{snippet}</blockquote>)}
@@ -569,6 +569,12 @@ function shouldRenderMemoAnswer(response: TaxChatResponse) {
   return response.answer.presentation === "memo";
 }
 
+function authorityStatusTone(status: string) {
+  if (status === "LIVE") return "green";
+  if (status === "CATALOG") return "blue";
+  return "red";
+}
+
 function ConversationalAnswer({ response, animate }: { response: TaxChatResponse; animate: boolean }) {
   const { answer, sourceIndex } = response;
   const sourceIds = Array.from(new Set([...answer.sourceIds, ...answer.citationIds, ...(answer.retrievedAuthority?.sources.map((source) => source.id) ?? [])]));
@@ -655,7 +661,7 @@ function ConversationalAnswer({ response, animate }: { response: TaxChatResponse
                     <article className="authority-source-card" key={source.id}>
                       <div className="item-card-title">
                         <h4><a href={source.sourceUrl}>{source.title}</a></h4>
-                        <StatusBadge label={source.fetchStatus} tone={source.fetchStatus === "LIVE" ? "green" : "red"} />
+                        <StatusBadge label={source.fetchStatus} tone={authorityStatusTone(source.fetchStatus)} />
                       </div>
                       <p>{source.publisher} · {source.authorityLevel.replaceAll("_", " ")} · retrieved {source.retrievedAt.slice(0, 10)}</p>
                     </article>

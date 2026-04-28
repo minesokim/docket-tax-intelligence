@@ -101,6 +101,11 @@ function claudeCliPath(): string {
   return process.env.DOCKET_CLAUDE_CODE_CLI_PATH || "claude";
 }
 
+function withClaudeCliModel(args: string[]): string[] {
+  const model = process.env.DOCKET_CLAUDE_CODE_CLI_MODEL?.trim();
+  return model ? [...args, "--model", model] : args;
+}
+
 export function getClaudeCodeCliStatus(): ClaudeCodeCliStatus {
   const path = claudeCliPath();
   const versionCheck = spawnSync(path, ["--version"], { encoding: "utf8", timeout: 2_000 });
@@ -121,6 +126,7 @@ export function getClaudeCodeCliStatus(): ClaudeCodeCliStatus {
       "The foundation keeps this provider local-only and disabled unless DOCKET_ENABLE_LOCAL_AI_CLI=true.",
       "Tax chat does not use the blocking local CLI polish pass unless DOCKET_ENABLE_TAX_CHAT_CLI_SYNTHESIS=true.",
       "Tax artifact polishing does not use the blocking local CLI pass unless DOCKET_ENABLE_TAX_ARTIFACT_CLI_SYNTHESIS=true.",
+      "Set DOCKET_CLAUDE_CODE_CLI_MODEL to pin a Claude model; otherwise the Claude Code CLI default is used.",
       "Run pnpm setup:claude to open the Claude Code browser login flow.",
     ],
   };
@@ -345,7 +351,7 @@ function runClaudeCodeCli(task: AIWorkflowTask, outputSchema: unknown, cliPath: 
 
   const raw = execFileSync(
     cliPath,
-    ["-p", prompt, "--output-format", "json", "--max-turns", "1", "--permission-mode", "acceptEdits"],
+    withClaudeCliModel(["-p", prompt, "--output-format", "json", "--max-turns", "1", "--permission-mode", "acceptEdits"]),
     {
       encoding: "utf8",
       timeout: 120_000,
@@ -440,7 +446,7 @@ export function synthesizeTaxChatWithClaude(input: TaxChatSynthesisInput): TaxCh
   ].join("\n\n");
 
   try {
-    const raw = execFileSync(claudeCliPath(), ["-p", prompt, "--output-format", "json", "--max-turns", "1"], {
+    const raw = execFileSync(claudeCliPath(), withClaudeCliModel(["-p", prompt, "--output-format", "json", "--max-turns", "1"]), {
       encoding: "utf8",
       timeout: envInt("DOCKET_TAX_CHAT_CLI_TIMEOUT_MS", 8_000, 30_000),
       maxBuffer: 1024 * 1024,
@@ -482,7 +488,7 @@ export function synthesizeTaxArtifactsWithClaude(input: TaxArtifactSynthesisInpu
   ].join("\n\n");
 
   try {
-    const raw = execFileSync(claudeCliPath(), ["-p", prompt, "--output-format", "json", "--max-turns", "1"], {
+    const raw = execFileSync(claudeCliPath(), withClaudeCliModel(["-p", prompt, "--output-format", "json", "--max-turns", "1"]), {
       encoding: "utf8",
       timeout: envInt("DOCKET_TAX_ARTIFACT_CLI_TIMEOUT_MS", 10_000, 30_000),
       maxBuffer: 3 * 1024 * 1024,

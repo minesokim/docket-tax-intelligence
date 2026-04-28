@@ -974,7 +974,7 @@ export type RetrievedAuthority = OfficialAuthorityDocument & {
   retrievedAt: string;
   pageLastUpdated: string | null;
   snippets: string[];
-  fetchStatus: "LIVE" | "FAILED";
+  fetchStatus: "LIVE" | "CATALOG" | "FAILED";
   error: string | null;
 };
 
@@ -1311,6 +1311,17 @@ type IrsSitemapEntry = {
 };
 
 let irsSitemapCache: { loadedAt: number; entries: IrsSitemapEntry[] } | null = null;
+let authorityResearchCache: Map<string, { loadedAt: number; result: AuthorityResearchResult }> = new Map();
+
+function envFlag(name: string): boolean {
+  return process.env[name] === "true" || process.env[name] === "1";
+}
+
+function envInt(name: string, fallback: number, max: number): number {
+  const value = Number(process.env[name]);
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return Math.min(Math.floor(value), max);
+}
 
 function sourceId(prefix: string, value: string): string {
   return `${prefix}-${normalize(value).replace(/\s+/g, "-").slice(0, 90)}`;
@@ -1489,6 +1500,7 @@ async function discoverFederalRegisterSources(query: string): Promise<OfficialAu
 }
 
 async function discoverOfficialAuthorityCandidates(query: string): Promise<OfficialAuthorityDocument[]> {
+  if (!envFlag("DOCKET_ENABLE_LIVE_AUTHORITY_DISCOVERY")) return OFFICIAL_AUTHORITY_CATALOG;
   const [irsSources, federalRegisterSources] = await Promise.all([discoverIrsSourcesFromSitemap(query), discoverFederalRegisterSources(query)]);
   return dedupeAuthoritySources([...OFFICIAL_AUTHORITY_CATALOG, ...irsSources, ...federalRegisterSources]);
 }
@@ -1543,7 +1555,7 @@ async function fetchOfficialSource(source: OfficialAuthorityDocument, query: str
     const response = await fetch(source.sourceUrl, {
       cache: "no-store",
       headers: { "user-agent": "DocketTaxIntelligence/0.1 (+local foundation build)" },
-      signal: AbortSignal.timeout(8_000),
+      signal: AbortSignal.timeout(envInt("DOCKET_AUTHORITY_FETCH_TIMEOUT_MS", 1_500, 8_000)),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const text = htmlToText(await response.text());
@@ -1569,10 +1581,25 @@ async function fetchOfficialSource(source: OfficialAuthorityDocument, query: str
   }
 }
 
+function catalogAuthoritySource(source: OfficialAuthorityDocument, query: string, retrievedAt: string): RetrievedAuthority {
+  const scored = authoritySearchScore(query, source);
+  return {
+    ...source,
+    score: scored.score,
+    retrievedAt,
+    pageLastUpdated: source.sourceDate ?? null,
+    snippets: [
+      `Catalog match: ${source.title} from ${source.publisher} (${source.authorityLevel.replaceAll("_", " ")}). Live page text was not fetched on this fast path.`,
+    ],
+    fetchStatus: "CATALOG",
+    error: null,
+  };
+}
+
 function answerFromAuthorities(query: string, sources: RetrievedAuthority[]): AuthorityResearchResult["answer"] {
-  const liveSources = sources.filter((source) => source.fetchStatus === "LIVE");
-  const primary = liveSources[0] ?? null;
-  const sourceList = liveSources.map((source) => `${source.title} (${source.authorityLevel.replaceAll("_", " ")})`).join("; ");
+  const supportedSources = sources.filter((source) => source.fetchStatus !== "FAILED");
+  const primary = supportedSources[0] ?? null;
+  const sourceList = supportedSources.map((source) => `${source.title} (${source.authorityLevel.replaceAll("_", " ")})`).join("; ");
   const normalizedQuery = normalize(query);
   const topicChecklist =
     /ob{2,6}a|ob3|one big beautiful|beautiful bill|public law 119-21|hr 1|h r 1|new tax law|tax law change/.test(normalizedQuery)
@@ -1593,12 +1620,15 @@ function answerFromAuthorities(query: string, sources: RetrievedAuthority[]): Au
             : /1095-a|marketplace|premium|aca/.test(normalizedQuery)
               ? ["Request Form 1095-A before finalizing ACA-related items.", "Reconcile coverage months and premium tax credit support.", "Block filing if firm policy treats missing 1095-A as material."]
               : ["Identify taxpayer type, tax year, jurisdiction, and form/schedule.", "Separate verified facts from client claims.", "Route judgment-heavy or unsupported positions to reviewer approval."];
-  const keySupport = liveSources.flatMap((source) => source.snippets.map((snippet) => `${source.title}: ${snippet}`)).slice(0, 3);
+  const keySupport = supportedSources.flatMap((source) => source.snippets.map((snippet) => `${source.title}: ${snippet}`)).slice(0, 3);
+  const hasLiveSources = supportedSources.some((source) => source.fetchStatus === "LIVE");
 
   return {
-    headline: primary ? `Research packet built from ${liveSources.length} current official source${liveSources.length === 1 ? "" : "s"}.` : "No official source could be retrieved.",
+    headline: primary
+      ? `Research packet built from ${supportedSources.length} official source${supportedSources.length === 1 ? "" : "s"}${hasLiveSources ? "" : " on the fast catalog path"}.`
+      : "No official source could be retrieved.",
     paragraphs:
-      liveSources.length > 0
+      supportedSources.length > 0
         ? [
             `Research question: "${query}". The strongest retrieved source is ${primary?.title ?? "the first live source"}; other retrieved authority includes ${sourceList}.`,
             `Visible EA analysis: this is research support, not final client advice. Apply the authority only after confirming taxpayer type, tax year, jurisdiction, material facts, and whether the area is supported by Docket's scope/rule package.`,
@@ -1610,12 +1640,14 @@ function answerFromAuthorities(query: string, sources: RetrievedAuthority[]): Au
             "A trusted tax conclusion should remain blocked until official authority is available and reviewed.",
           ],
     reasoningSummary: [
-      "Retrieved current official-source pages at request time instead of using model memory.",
+      hasLiveSources ? "Retrieved current official-source pages at request time instead of using model memory." : "Used the official-source catalog fast path instead of blocking on live page retrieval.",
       "Ranked candidate sources by topic match and authority level.",
-      "Extracted snippets from retrieved source text and preserved source URL, publisher, authority level, retrieval time, and page update metadata.",
+      hasLiveSources
+        ? "Extracted snippets from retrieved source text and preserved source URL, publisher, authority level, retrieval time, and page update metadata."
+        : "Preserved source URL, publisher, authority level, retrieval time, and noted that live page text was not fetched on this path.",
     ],
     nextSteps:
-      liveSources.length > 0
+      supportedSources.length > 0
         ? topicChecklist
         : ["Retry retrieval, broaden the query, or add a new official source adapter for this topic."],
     caveat: "This is not final client-facing tax advice. Docket still requires professional review before relying on the conclusion.",
@@ -1624,24 +1656,39 @@ function answerFromAuthorities(query: string, sources: RetrievedAuthority[]): Au
 
 export async function retrieveOfficialAuthority(query: string): Promise<AuthorityResearchResult> {
   const retrievedAt = new Date().toISOString();
+  const liveFetchEnabled = envFlag("DOCKET_ENABLE_LIVE_AUTHORITY_FETCH");
+  const cacheTtlMs = envInt("DOCKET_AUTHORITY_CACHE_TTL_MS", 1000 * 60 * 10, 1000 * 60 * 60);
+  const cacheKey = JSON.stringify({
+    q: normalize(query),
+    liveFetchEnabled,
+    liveDiscoveryEnabled: envFlag("DOCKET_ENABLE_LIVE_AUTHORITY_DISCOVERY"),
+  });
+  const cached = authorityResearchCache.get(cacheKey);
+  if (cached && Date.now() - cached.loadedAt < cacheTtlMs) return cached.result;
+
   const candidateCatalog = await discoverOfficialAuthorityCandidates(query);
   const ranked = rankAuthorityCatalog(query, candidateCatalog).slice(0, 6);
   const candidates = ranked.length > 0 ? ranked : [];
-  const sources = await Promise.all(candidates.map((source) => fetchOfficialSource(source, query, retrievedAt)));
+  const sources = liveFetchEnabled
+    ? await Promise.all(candidates.slice(0, envInt("DOCKET_AUTHORITY_LIVE_SOURCE_LIMIT", 3, 6)).map((source) => fetchOfficialSource(source, query, retrievedAt)))
+    : candidates.map((source) => catalogAuthoritySource(source, query, retrievedAt));
   const sortedSources = sources.sort(
     (a, b) => {
-      const liveDiff = (b.fetchStatus === "LIVE" ? 1 : 0) - (a.fetchStatus === "LIVE" ? 1 : 0);
-      if (liveDiff !== 0) return liveDiff;
+      const statusRank = (source: RetrievedAuthority) => (source.fetchStatus === "LIVE" ? 2 : source.fetchStatus === "CATALOG" ? 1 : 0);
+      const statusDiff = statusRank(b) - statusRank(a);
+      if (statusDiff !== 0) return statusDiff;
       const scoreDiff = b.score - a.score;
       if (Math.abs(scoreDiff) > 2) return scoreDiff;
       return authorityRank(a.authorityLevel) - authorityRank(b.authorityLevel) || scoreDiff;
     },
   );
 
-  return {
+  const result = {
     query,
     retrievedAt,
     sources: sortedSources,
     answer: answerFromAuthorities(query, sortedSources),
   };
+  authorityResearchCache.set(cacheKey, { loadedAt: Date.now(), result });
+  return result;
 }
