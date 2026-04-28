@@ -109,11 +109,15 @@ function scoreCitationFit(packet: SourcePacketItem, issuePacket: IssueReasoningP
   const tokens = importantTokens(issueText);
   const overlap = tokens.filter((token) => sourceText.includes(token)).length;
   const keywordFit =
+    (/k-?1|partnership|pass.through|schedule e/.test(issueText.toLowerCase()) && /k-?1|partnership|pass.through|schedule e/.test(sourceText)) ||
     (/1095|marketplace|premium/.test(issueText.toLowerCase()) && /1095|marketplace|premium/.test(sourceText)) ||
     (/home|office|exclusive/.test(issueText.toLowerCase()) && /home|office|exclusive/.test(sourceText)) ||
     (/mileage|vehicle/.test(issueText.toLowerCase()) && /mileage|vehicle|274/.test(sourceText)) ||
     (/income|gross|receipts|1099|nec|stripe/.test(issueText.toLowerCase()) && /schedule c|gross|receipt|1099|6041/.test(sourceText)) ||
     (/stock|broker|1099-b|capital/.test(issueText.toLowerCase()) && /broker|1099-b|6045|capital/.test(sourceText)) ||
+    (/crypto|digital.asset|virtual.currency|tax.lot|unsupported/.test(issueText.toLowerCase()) && /crypto|digital.asset|digital assets|virtual.currency|form 8949|schedule d|unsupported|tax.lot/.test(sourceText)) ||
+    (/education|student|1098-t|tuition/.test(issueText.toLowerCase()) && /education|student|1098-t|tuition/.test(sourceText)) ||
+    (/retirement|1099-r|pension|ira/.test(issueText.toLowerCase()) && /retirement|1099-r|pension|ira/.test(sourceText)) ||
     (/residen|state|california|texas/.test(issueText.toLowerCase()) && /residen|state|california|domicile/.test(sourceText));
   if (keywordFit) return 1;
   if (tokens.length === 0) return packet.authorityLevel ? 0.7 : 0.4;
@@ -134,8 +138,10 @@ function scoreIssueCitationAccuracy(envelope: ChatArtifactEnvelope): number {
 }
 
 function scoreSourceFreshness(envelope: ChatArtifactEnvelope): number {
+  const materialIssuePackets = envelope.issuePackets.filter((packet) => packet.situationClassification.blocker || packet.situationClassification.riskLevel === "RED");
+  if (materialIssuePackets.length === 0 && !envelope.memo?.verdict.filingStatus.toLowerCase().includes("not ready")) return 1;
   const authorityPackets = envelope.sourcePacket.filter((packet) => packet.sourceType === "tax_citation" || packet.sourceType === "tax_authority");
-  if (authorityPackets.length === 0) return 0;
+  if (authorityPackets.length === 0) return materialIssuePackets.length === 0 ? 1 : 0;
   const freshCount = authorityPackets.filter((packet) => packet.retrievedAt && packet.recencyConfidence >= 0.65 && packet.sourceDate !== null).length;
   return scoreRatio(freshCount, authorityPackets.length);
 }

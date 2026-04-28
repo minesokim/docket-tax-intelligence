@@ -15,6 +15,25 @@ import { readDocketData } from "./store";
 import type { DocketData, TaxAuthoritySource, TaxCitation } from "./types";
 
 const NOW = "2026-04-26T12:00:00.000Z";
+const SEARCH_STOP_WORDS = new Set([
+  "and",
+  "client",
+  "current",
+  "credit",
+  "document",
+  "expected",
+  "filing",
+  "form",
+  "irs",
+  "issue",
+  "missing",
+  "return",
+  "review",
+  "source",
+  "status",
+  "tax",
+  "with",
+]);
 
 function packetId(sourceType: SourcePacketItem["sourceType"], id: string): string {
   return `packet-${sourceType}-${id}`;
@@ -329,12 +348,39 @@ export function searchReturnSourcePacket(returnId: string, query: string, data: 
   return searchPacketsByQuery(buildReturnSourcePacket(returnId, data), query);
 }
 
+function normalizeTaxSearchText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/\bk[\s-]?1\b/g, " k1 ")
+    .replace(/\b1099[\s-]?b\b/g, " 1099b ")
+    .replace(/\b1099[\s-]?nec\b/g, " 1099nec ")
+    .replace(/\b1099[\s-]?k\b/g, " 1099k ")
+    .replace(/\b1095[\s-]?a\b/g, " 1095a ")
+    .replace(/\btax[\s-]?lot\b/g, " taxlot ")
+    .replace(/\bwash[\s-]?sale\b/g, " washsale ");
+}
+
+function expandSearchQuery(query: string): string {
+  const normalized = normalizeTaxSearchText(query);
+  const aliases: string[] = [];
+  if (/\bk1\b|partnership|partner|schedule e/.test(normalized)) aliases.push("schedule e partnership s corporation estate trust k1 partner pass through");
+  if (/1099b|broker|stock|capital|washsale/.test(normalized)) aliases.push("1099b form 8949 schedule d capital gain broker basis washsale investment");
+  if (/crypto|digital asset|virtual currency|taxlot/.test(normalized)) aliases.push("digital assets virtual currency cryptocurrency capital gain form 8949 schedule d unsupported taxlot");
+  if (/1095a|marketplace|premium|aca/.test(normalized)) aliases.push("1095a marketplace premium tax credit aca");
+  if (/education|student|1098t|tuition/.test(normalized)) aliases.push("education credit student 1098t tuition");
+  if (/1099r|retirement|pension|ira|distribution/.test(normalized)) aliases.push("retirement pension ira distribution 1099r");
+  if (/resident|residency|domicile|state|california|texas/.test(normalized)) aliases.push("state residency domicile part year nonresident allocation");
+  return [query, ...aliases].join(" ");
+}
+
 function searchPacketsByQuery(packets: SourcePacketItem[], query: string): SourcePacketItem[] {
-  const terms = query.toLowerCase().split(/\W+/).filter((term) => term.length > 2);
+  const terms = normalizeTaxSearchText(expandSearchQuery(query))
+    .split(/\W+/)
+    .filter((term) => (term.length > 2 || ["k1"].includes(term)) && !SEARCH_STOP_WORDS.has(term));
   if (terms.length === 0) return packets;
   return packets
     .map((packet) => {
-      const haystack = `${packet.label} ${packet.excerpt} ${packet.sourceType}`.toLowerCase();
+      const haystack = normalizeTaxSearchText(`${packet.label} ${packet.excerpt}`);
       const score = terms.reduce((total, term) => total + (haystack.includes(term) ? 1 : 0), 0);
       return { packet, score };
     })

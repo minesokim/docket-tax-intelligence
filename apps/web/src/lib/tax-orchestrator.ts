@@ -83,6 +83,21 @@ function localAuthorityPacketIds(sourcePacket: SourcePacketItem[], issueTitle: s
       if (issueType.includes("INCOME") || issueType.includes("1099")) {
         if (haystack.includes("schedule c") || haystack.includes("gross receipts")) score += 3;
       }
+      if (/K1|K_1|PARTNERSHIP/i.test(issueType) || query.includes("k-1")) {
+        if (haystack.includes("schedule e") || haystack.includes("partnership") || haystack.includes("k-1")) score += 4;
+      }
+      if (/CAPITAL|1099.?B|BROKER|WASH/i.test(issueType) || query.includes("1099-b")) {
+        if (haystack.includes("1099-b") || haystack.includes("form 8949") || haystack.includes("schedule d") || haystack.includes("broker")) score += 4;
+      }
+      if (/CRYPTO|DIGITAL|UNSUPPORTED/i.test(issueType) || query.includes("crypto") || query.includes("tax-lot")) {
+        if (haystack.includes("digital asset") || haystack.includes("virtual currency") || haystack.includes("form 8949") || haystack.includes("unsupported")) score += 4;
+      }
+      if (/EDUCATION|1098.?T/i.test(issueType) || query.includes("education")) {
+        if (haystack.includes("education") || haystack.includes("1098-t") || haystack.includes("tuition")) score += 4;
+      }
+      if (/1099.?R|RETIREMENT|PENSION|IRA/i.test(issueType) || query.includes("retirement")) {
+        if (haystack.includes("1099-r") || haystack.includes("retirement") || haystack.includes("pension") || haystack.includes("ira")) score += 4;
+      }
       return { packet, score };
     })
     .filter((item) => item.score > 0)
