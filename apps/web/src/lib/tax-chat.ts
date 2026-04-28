@@ -2374,6 +2374,7 @@ function maybeSynthesizeWithClaude(
 ): ChatAnswer {
   if (!question.trim() || isCasualMessage(question)) return answer;
   if (answer.mode === "firm-portfolio") return answer;
+  if (answer.presentation === "refusal" || isBroadClientWorkRequest(question) || isClientPlanningQuestion(question)) return answer;
   const q = question.toLowerCase();
   const exactSourceLookup =
     (/\bconfirm\b|\bexact\b|\bsource\b|\bline\b|\bbox\b/.test(q) && /\b1099-nec|nec|nonemployee compensation|42,?000\b/.test(q)) ||

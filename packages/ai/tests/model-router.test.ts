@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { IDS, cloneDocketData } from "@docket/domain";
 
-import { ModelRouter, getClaudeCodeCliStatus } from "../src/index";
+import { ModelRouter, getClaudeCodeCliStatus, synthesizeTaxChatWithClaude } from "../src/index";
 
 const reasoningOutput = {
   establishedFacts: [],
@@ -53,5 +53,40 @@ describe("model router local CLI providers", () => {
     expect(status.provider).toBe("claude_code_cli");
     expect(status.authCommand).toBe("pnpm setup:claude");
     expect(status.notes.length).toBeGreaterThan(0);
+  });
+
+  it("does not run blocking tax-chat CLI synthesis unless explicitly enabled", () => {
+    const previousProvider = process.env.DOCKET_AI_PROVIDER;
+    const previousLocalCli = process.env.DOCKET_ENABLE_LOCAL_AI_CLI;
+    const previousChatCli = process.env.DOCKET_ENABLE_TAX_CHAT_CLI_SYNTHESIS;
+    process.env.DOCKET_AI_PROVIDER = "claude_code_cli";
+    process.env.DOCKET_ENABLE_LOCAL_AI_CLI = "true";
+    delete process.env.DOCKET_ENABLE_TAX_CHAT_CLI_SYNTHESIS;
+
+    try {
+      const result = synthesizeTaxChatWithClaude({
+        question: "what do we need to do for Miguel?",
+        mode: "client-return",
+        clientContextLabel: "Miguel Sandoval",
+        draftAnswer: {
+          presentation: "conversation",
+          headline: "Miguel needs review.",
+          answer: ["Four buckets need attention."],
+          reasoningSummary: [],
+          nextSteps: [],
+          suggestedFollowups: [],
+        },
+        sourcePacket: [],
+      });
+
+      expect(result).toBeNull();
+    } finally {
+      if (previousProvider === undefined) delete process.env.DOCKET_AI_PROVIDER;
+      else process.env.DOCKET_AI_PROVIDER = previousProvider;
+      if (previousLocalCli === undefined) delete process.env.DOCKET_ENABLE_LOCAL_AI_CLI;
+      else process.env.DOCKET_ENABLE_LOCAL_AI_CLI = previousLocalCli;
+      if (previousChatCli === undefined) delete process.env.DOCKET_ENABLE_TAX_CHAT_CLI_SYNTHESIS;
+      else process.env.DOCKET_ENABLE_TAX_CHAT_CLI_SYNTHESIS = previousChatCli;
+    }
   });
 });

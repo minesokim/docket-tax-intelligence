@@ -290,6 +290,7 @@ describe("tax research authority ranking", () => {
 
     expect(response.answer.mode).toBe("client-return");
     expect(response.answer.presentation).toBe("conversation");
+    expect(response.answer.synthesizedBy).toBeUndefined();
     expect(response.contextLabel).toContain("Miguel Sandoval");
     expect(response.answer.artifacts).toBeUndefined();
     expect(response.answer.professionalAnalyses).toBeUndefined();
@@ -304,6 +305,7 @@ describe("tax research authority ranking", () => {
 
     expect(response.answer.mode).toBe("client-return");
     expect(response.answer.presentation).toBe("conversation");
+    expect(response.answer.synthesizedBy).toBeUndefined();
     expect(response.contextLabel).toContain("Miguel Sandoval");
     expect(response.answer.headline).toContain("not ready to file");
     expect(response.answer.artifacts).toBeDefined();

@@ -91,6 +91,12 @@ function envFlag(name: string): boolean {
   return process.env[name] === "true" || process.env[name] === "1";
 }
 
+function envInt(name: string, fallback: number, max: number): number {
+  const value = Number(process.env[name]);
+  if (!Number.isFinite(value) || value <= 0) return fallback;
+  return Math.min(Math.floor(value), max);
+}
+
 function claudeCliPath(): string {
   return process.env.DOCKET_CLAUDE_CODE_CLI_PATH || "claude";
 }
@@ -113,6 +119,8 @@ export function getClaudeCodeCliStatus(): ClaudeCodeCliStatus {
     notes: [
       "Claude Code CLI uses the local user's Claude authentication, not a Docket-managed API key.",
       "The foundation keeps this provider local-only and disabled unless DOCKET_ENABLE_LOCAL_AI_CLI=true.",
+      "Tax chat does not use the blocking local CLI polish pass unless DOCKET_ENABLE_TAX_CHAT_CLI_SYNTHESIS=true.",
+      "Tax artifact polishing does not use the blocking local CLI pass unless DOCKET_ENABLE_TAX_ARTIFACT_CLI_SYNTHESIS=true.",
       "Run pnpm setup:claude to open the Claude Code browser login flow.",
     ],
   };
@@ -389,7 +397,11 @@ export class ModelRouter {
 export const defaultModelRouter = new ModelRouter({ provider: "mock", externalCallsAllowed: false });
 
 export function synthesizeTaxChatWithClaude(input: TaxChatSynthesisInput): TaxChatSynthesisOutput | null {
-  if (process.env.DOCKET_AI_PROVIDER !== "claude_code_cli" || !envFlag("DOCKET_ENABLE_LOCAL_AI_CLI")) {
+  if (
+    process.env.DOCKET_AI_PROVIDER !== "claude_code_cli" ||
+    !envFlag("DOCKET_ENABLE_LOCAL_AI_CLI") ||
+    !envFlag("DOCKET_ENABLE_TAX_CHAT_CLI_SYNTHESIS")
+  ) {
     return null;
   }
 
@@ -430,7 +442,7 @@ export function synthesizeTaxChatWithClaude(input: TaxChatSynthesisInput): TaxCh
   try {
     const raw = execFileSync(claudeCliPath(), ["-p", prompt, "--output-format", "json", "--max-turns", "1"], {
       encoding: "utf8",
-      timeout: 120_000,
+      timeout: envInt("DOCKET_TAX_CHAT_CLI_TIMEOUT_MS", 8_000, 30_000),
       maxBuffer: 1024 * 1024,
     });
     return asTaxChatSynthesisOutput(parseCliJson(raw), input.draftAnswer);
@@ -440,7 +452,11 @@ export function synthesizeTaxChatWithClaude(input: TaxChatSynthesisInput): TaxCh
 }
 
 export function synthesizeTaxArtifactsWithClaude(input: TaxArtifactSynthesisInput): TaxArtifactSynthesisOutput | null {
-  if (process.env.DOCKET_AI_PROVIDER !== "claude_code_cli" || !envFlag("DOCKET_ENABLE_LOCAL_AI_CLI")) {
+  if (
+    process.env.DOCKET_AI_PROVIDER !== "claude_code_cli" ||
+    !envFlag("DOCKET_ENABLE_LOCAL_AI_CLI") ||
+    !envFlag("DOCKET_ENABLE_TAX_ARTIFACT_CLI_SYNTHESIS")
+  ) {
     return null;
   }
 
@@ -468,7 +484,7 @@ export function synthesizeTaxArtifactsWithClaude(input: TaxArtifactSynthesisInpu
   try {
     const raw = execFileSync(claudeCliPath(), ["-p", prompt, "--output-format", "json", "--max-turns", "1"], {
       encoding: "utf8",
-      timeout: 120_000,
+      timeout: envInt("DOCKET_TAX_ARTIFACT_CLI_TIMEOUT_MS", 10_000, 30_000),
       maxBuffer: 3 * 1024 * 1024,
     });
     return asTaxArtifactSynthesisOutput(parseCliJson(raw), input);
