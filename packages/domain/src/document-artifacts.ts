@@ -86,7 +86,24 @@ Status: not signed
 Note: E-file remains disabled in the foundation release.`,
 };
 
+const UPLOADED_TEXT_PREFIX = "uploaded-text://";
+
+export function storageKeyForUploadedText(text: string): string {
+  return `${UPLOADED_TEXT_PREFIX}${Buffer.from(text, "utf8").toString("base64url")}`;
+}
+
+function uploadedTextFromStorageKey(storageKey: string): string | null {
+  if (!storageKey.startsWith(UPLOADED_TEXT_PREFIX)) return null;
+  try {
+    return Buffer.from(storageKey.slice(UPLOADED_TEXT_PREFIX.length), "base64url").toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
 export function getSeedDocumentText(document: SourceDocument): string | null {
+  const uploadedText = uploadedTextFromStorageKey(document.storageKey);
+  if (uploadedText) return uploadedText;
   const explicit = SEEDED_DOCUMENT_TEXT[document.storageKey];
   if (explicit) return explicit;
   if (!document.storageKey.startsWith("fixture://documents/")) return null;

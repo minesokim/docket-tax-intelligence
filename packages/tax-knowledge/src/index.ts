@@ -984,6 +984,33 @@ const OFFICIAL_AUTHORITY_CATALOG: OfficialAuthorityDocument[] = [
     topicTags: ["schedule c", "gross receipts", "self employment", "business income", "sole proprietor"],
   },
   {
+    id: "irs-schedule-e",
+    title: "About Schedule E (Form 1040), Supplemental Income and Loss",
+    authorityLevel: "IRS_FORM_INSTRUCTION",
+    sourceUrl: "https://www.irs.gov/forms-pubs/about-schedule-e-form-1040",
+    jurisdiction: "US",
+    publisher: "IRS",
+    topicTags: ["schedule e", "rental", "partnership", "s corporation", "k-1", "pass through", "supplemental income"],
+  },
+  {
+    id: "irs-pub-334",
+    title: "Publication 334, Tax Guide for Small Business",
+    authorityLevel: "IRS_PUBLICATION",
+    sourceUrl: "https://www.irs.gov/forms-pubs/about-publication-334",
+    jurisdiction: "US",
+    publisher: "IRS",
+    topicTags: ["small business", "schedule c", "self employment", "business income", "business expense"],
+  },
+  {
+    id: "irs-pub-535",
+    title: "Publication 535, Business Expenses",
+    authorityLevel: "IRS_PUBLICATION",
+    sourceUrl: "https://www.irs.gov/forms-pubs/about-publication-535",
+    jurisdiction: "US",
+    publisher: "IRS",
+    topicTags: ["business expenses", "deductions", "ordinary and necessary", "schedule c"],
+  },
+  {
     id: "irs-pub-1345",
     title: "Publication 1345, Handbook for Authorized IRS e-file Providers",
     authorityLevel: "IRS_PUBLICATION",
@@ -991,6 +1018,78 @@ const OFFICIAL_AUTHORITY_CATALOG: OfficialAuthorityDocument[] = [
     jurisdiction: "US",
     publisher: "IRS",
     topicTags: ["e-file", "efile", "8879", "ero", "signature authorization"],
+  },
+  {
+    id: "irs-pub-17",
+    title: "Publication 17, Your Federal Income Tax",
+    authorityLevel: "IRS_PUBLICATION",
+    sourceUrl: "https://www.irs.gov/forms-pubs/about-publication-17",
+    jurisdiction: "US",
+    publisher: "IRS",
+    topicTags: ["1040", "individual income tax", "filing status", "dependents", "education credit", "retirement income", "1099-r"],
+  },
+  {
+    id: "irs-pub-550",
+    title: "Publication 550, Investment Income and Expenses",
+    authorityLevel: "IRS_PUBLICATION",
+    sourceUrl: "https://www.irs.gov/forms-pubs/about-publication-550",
+    jurisdiction: "US",
+    publisher: "IRS",
+    topicTags: ["investment income", "1099-b", "brokerage", "capital gains", "schedule d", "form 8949", "wash sale"],
+  },
+  {
+    id: "irs-form-8949",
+    title: "About Form 8949, Sales and Other Dispositions of Capital Assets",
+    authorityLevel: "IRS_FORM_INSTRUCTION",
+    sourceUrl: "https://www.irs.gov/forms-pubs/about-form-8949",
+    jurisdiction: "US",
+    publisher: "IRS",
+    topicTags: ["form 8949", "capital assets", "capital gains", "stock sale", "1099-b", "basis"],
+  },
+  {
+    id: "irs-form-1095a",
+    title: "About Form 1095-A, Health Insurance Marketplace Statement",
+    authorityLevel: "IRS_FORM_INSTRUCTION",
+    sourceUrl: "https://www.irs.gov/forms-pubs/about-form-1095-a",
+    jurisdiction: "US",
+    publisher: "IRS",
+    topicTags: ["1095-a", "marketplace", "premium tax credit", "aca", "health insurance"],
+  },
+  {
+    id: "irs-digital-assets",
+    title: "Digital assets",
+    authorityLevel: "IRS_FAQ",
+    sourceUrl: "https://www.irs.gov/filing/digital-assets",
+    jurisdiction: "US",
+    publisher: "IRS",
+    topicTags: ["digital assets", "crypto", "cryptocurrency", "virtual currency", "1099-da", "form 8949"],
+  },
+  {
+    id: "ecfr-title-26",
+    title: "eCFR Title 26, Internal Revenue",
+    authorityLevel: "TREASURY_REGULATION",
+    sourceUrl: "https://www.ecfr.gov/current/title-26",
+    jurisdiction: "US",
+    publisher: "eCFR",
+    topicTags: ["treasury regulations", "26 cfr", "regulations", "internal revenue"],
+  },
+  {
+    id: "federal-register-irs",
+    title: "Federal Register IRS agency documents",
+    authorityLevel: "FEDERAL_REGISTER",
+    sourceUrl: "https://www.federalregister.gov/agencies/internal-revenue-service",
+    jurisdiction: "US",
+    publisher: "Federal Register",
+    topicTags: ["federal register", "treasury decision", "proposed regulations", "final regulations", "irs rulemaking"],
+  },
+  {
+    id: "irs-irb",
+    title: "Internal Revenue Bulletin",
+    authorityLevel: "INTERNAL_REVENUE_BULLETIN",
+    sourceUrl: "https://www.irs.gov/irb",
+    jurisdiction: "US",
+    publisher: "IRS",
+    topicTags: ["internal revenue bulletin", "revenue ruling", "revenue procedure", "notice", "announcement"],
   },
   {
     id: "irs-circular-230",
@@ -1021,7 +1120,22 @@ function authorityRank(level: AuthorityLevel): number {
 export function rankAuthorityCatalog(query: string, catalog: OfficialAuthorityDocument[] = OFFICIAL_AUTHORITY_CATALOG): OfficialAuthorityDocument[] {
   const normalizedQuery = normalize(query);
   const tokens = queryTokens(query);
-  return catalog
+  const focusedCatalog =
+    /mileage|vehicle|car|travel|substantiat/.test(normalizedQuery)
+      ? catalog.filter((source) => /mileage|vehicle|\bcar\b|travel|substantiation|business purpose/.test(normalize(`${source.title} ${source.topicTags.join(" ")}`)))
+      : /s corp|s corporation|2553|small business corporation|election/.test(normalizedQuery)
+        ? catalog.filter((source) => /s corp|s corporation|2553|small business corporation|election/.test(normalize(`${source.title} ${source.topicTags.join(" ")}`)))
+        : /home office|business use of home|exclusive/.test(normalizedQuery)
+          ? catalog.filter((source) => /home office|business use of home|exclusive|regular use/.test(normalize(`${source.title} ${source.topicTags.join(" ")}`)))
+          : /1099-b|1099b|stock|broker|capital|8949|schedule d|wash sale/.test(normalizedQuery)
+            ? catalog.filter((source) => /1099-b|1099b|stock|broker|capital|8949|schedule d|wash sale|investment/.test(normalize(`${source.title} ${source.topicTags.join(" ")}`)))
+            : /crypto|digital asset|virtual currency|1099-da/.test(normalizedQuery)
+              ? catalog.filter((source) => /crypto|digital asset|virtual currency|1099-da|8949/.test(normalize(`${source.title} ${source.topicTags.join(" ")}`)))
+              : /1095-a|1095a|marketplace|premium tax credit|aca/.test(normalizedQuery)
+                ? catalog.filter((source) => /1095-a|1095a|marketplace|premium tax credit|aca/.test(normalize(`${source.title} ${source.topicTags.join(" ")}`)))
+                : catalog;
+  const pool = focusedCatalog.length > 0 ? focusedCatalog : catalog;
+  return pool
     .map((source) => {
       const haystack = normalize(`${source.title} ${source.topicTags.join(" ")}`);
       const tokenScore = tokens.reduce((score, token) => score + (haystack.includes(token) ? 2 : 0), 0);
@@ -1112,15 +1226,30 @@ function answerFromAuthorities(query: string, sources: RetrievedAuthority[]): Au
   const liveSources = sources.filter((source) => source.fetchStatus === "LIVE");
   const primary = liveSources[0] ?? null;
   const sourceList = liveSources.map((source) => `${source.title} (${source.authorityLevel.replaceAll("_", " ")})`).join("; ");
+  const normalizedQuery = normalize(query);
+  const topicChecklist =
+    /s corp|s corporation|2553|election/.test(normalizedQuery)
+      ? ["Confirm entity eligibility and shareholder consent.", "Check Form 2553 timing or late-election relief path.", "Document effective date, tax year, and reviewer approval."]
+      : /mileage|vehicle|car|travel/.test(normalizedQuery)
+        ? ["Establish date, destination, mileage, and business purpose.", "Separate commuting/personal use from business use.", "Attach contemporaneous log support before claiming."]
+        : /home office|business use of home|exclusive/.test(normalizedQuery)
+          ? ["Confirm exclusive and regular business use.", "Collect square footage and expense support only after eligibility is supported.", "Escalate ambiguous personal use to reviewer."]
+          : /1099-b|stock|broker|capital|8949|schedule d|crypto|digital asset/.test(normalizedQuery)
+            ? ["Obtain transaction-level proceeds, basis, dates, and adjustment detail.", "Do not compute gain/loss from client memory alone.", "Route unsupported tax-lot or basis questions to reviewer-controlled workflow."]
+            : /1095-a|marketplace|premium|aca/.test(normalizedQuery)
+              ? ["Request Form 1095-A before finalizing ACA-related items.", "Reconcile coverage months and premium tax credit support.", "Block filing if firm policy treats missing 1095-A as material."]
+              : ["Identify taxpayer type, tax year, jurisdiction, and form/schedule.", "Separate verified facts from client claims.", "Route judgment-heavy or unsupported positions to reviewer approval."];
+  const keySupport = liveSources.flatMap((source) => source.snippets.map((snippet) => `${source.title}: ${snippet}`)).slice(0, 3);
 
   return {
-    headline: primary ? `Retrieved ${liveSources.length} current official source${liveSources.length === 1 ? "" : "s"} for this tax question.` : "No official source could be retrieved.",
+    headline: primary ? `Research packet built from ${liveSources.length} current official source${liveSources.length === 1 ? "" : "s"}.` : "No official source could be retrieved.",
     paragraphs:
       liveSources.length > 0
         ? [
-            `Docket retrieved official authority for: "${query}". The strongest retrieved source is ${primary?.title ?? "the first live source"}.`,
-            `Relevant retrieved sources: ${sourceList}. The answer should be treated as research support until a professional reviews the authority and applies it to client facts.`,
-            `Key extracted support: ${liveSources.flatMap((source) => source.snippets).slice(0, 2).join(" ")}`,
+            `Research question: "${query}". The strongest retrieved source is ${primary?.title ?? "the first live source"}; other retrieved authority includes ${sourceList}.`,
+            `Visible EA analysis: this is research support, not final client advice. Apply the authority only after confirming taxpayer type, tax year, jurisdiction, material facts, and whether the area is supported by Docket's scope/rule package.`,
+            `Key extracted support: ${keySupport.join(" ")}`,
+            `Practitioner workflow: ${topicChecklist.join(" ")}`,
           ]
         : [
             "Docket could not retrieve official authority for this query during this run.",
@@ -1133,11 +1262,7 @@ function answerFromAuthorities(query: string, sources: RetrievedAuthority[]): Au
     ],
     nextSteps:
       liveSources.length > 0
-        ? [
-            "Review the cited official source pages and any linked form instructions or PDFs.",
-            "Apply the authority to the taxpayer type, tax year, jurisdiction, and facts.",
-            "Escalate unsupported or judgment-heavy positions for reviewer approval before client-facing advice.",
-          ]
+        ? topicChecklist
         : ["Retry retrieval, broaden the query, or add a new official source adapter for this topic."],
     caveat: "This is not final client-facing tax advice. Docket still requires professional review before relying on the conclusion.",
   };

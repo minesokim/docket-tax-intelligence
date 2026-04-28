@@ -1,4 +1,4 @@
-export { classifyDocumentText, detectPromptInjectionText, extractFieldsFromDocumentText, getSeedDocumentText, runDocumentExtraction } from "@docket/domain";
+export { classifyDocumentText, detectPromptInjectionText, extractFieldsFromDocumentText, getSeedDocumentText, runDocumentExtraction, uploadTextDocumentForReturn } from "@docket/domain";
 import type { DocumentClass, ExtractedFieldFixture } from "@docket/domain";
 
 export const DOCUMENT_PIPELINE_STEPS = [

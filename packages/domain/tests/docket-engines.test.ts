@@ -48,6 +48,7 @@ import {
   setDocketRepository,
   signReturnAuthorization,
   unsupportedScopeResponse,
+  uploadTextDocumentForReturn,
 } from "../src/index";
 
 describe("Docket tax intelligence engines", () => {
@@ -233,6 +234,27 @@ describe("Docket tax intelligence engines", () => {
         metadata: expect.objectContaining({ provider: "mock_ocr" }),
       }),
     );
+  });
+
+  it("accepts a newly uploaded text document and routes it through classification, extraction, and evidence-backed fact creation", () => {
+    const uploaded = uploadTextDocumentForReturn(cloneDocketData(), IDS.taxReturn, {
+      fileName: "Uploaded_1099_INT_2024.txt",
+      text: "Form 1099-INT Interest Income\nTax year: 2024\nPayer: First Local Bank\nInterest income: $219.44",
+      uploadedBy: "CLIENT",
+    });
+    const document = uploaded.data.sourceDocuments.find((item) => item.fileName === "Uploaded_1099_INT_2024.txt");
+    expect(document).toEqual(expect.objectContaining({ documentClass: "FORM_1099_INT", taxYear: 2024 }));
+    expect(uploaded.data.documentExtractions.find((item) => item.sourceDocumentId === document?.id)).toEqual(
+      expect.objectContaining({ provider: "mock_ocr", status: "COMPLETE" }),
+    );
+    expect(uploaded.data.taxFacts).toContainEqual(
+      expect.objectContaining({
+        factType: "INTEREST_INCOME",
+        value: 219.44,
+      }),
+    );
+    expect(uploaded.auditEvents.map((event) => event.eventType)).toContain("DOCUMENT_UPLOADED");
+    expect(uploaded.auditEvents.map((event) => event.eventType)).toContain("AI_EXTRACTION_RUN");
   });
 
   it("blocks workflows without required consent and checks permissions", () => {

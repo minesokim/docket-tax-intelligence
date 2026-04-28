@@ -1473,6 +1473,23 @@ main {
   margin: 0;
 }
 
+.upload-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.upload-form input[type="file"] {
+  min-height: 40px;
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+}
+
 .suggestion-chip {
   min-height: 30px;
   border-radius: 999px;

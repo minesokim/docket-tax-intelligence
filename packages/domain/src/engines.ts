@@ -18,7 +18,7 @@ import {
   TaxFactSchema,
   type WorkflowResult,
 } from "./types";
-import { extractFieldsFromDocumentText, getSeedDocumentText } from "./document-artifacts";
+import { classifyDocumentText, extractFieldsFromDocumentText, getSeedDocumentText, storageKeyForUploadedText } from "./document-artifacts";
 import { IDS, NOW, cloneDocketData } from "./seed";
 
 type AIProviderName = AIReasoningRun["provider"];
@@ -433,6 +433,59 @@ export function runDocumentExtraction(inputData: DocketData, returnId: string): 
 
   markExportPacketStale(data, returnId);
   return { data, auditEvents: events, blocked: false, blockers: [] };
+}
+
+export function uploadTextDocumentForReturn(
+  inputData: DocketData,
+  returnId: string,
+  input: { fileName: string; text: string; uploadedBy?: SourceDocument["uploadedBy"] },
+): WorkflowResult {
+  const data = cloneDocketData(inputData);
+  const taxReturn = findReturn(data, returnId);
+  const trimmedText = input.text.trim();
+  if (!trimmedText) {
+    const event = audit(data, "WORKFLOW_BLOCKED", "Uploaded document text was empty.", { returnId }, "SYSTEM");
+    return { data, auditEvents: [event], blocked: true, blockers: ["Uploaded document text was empty."] };
+  }
+
+  const classification = classifyDocumentText(input.fileName, trimmedText);
+  const baseId = `doc-upload-${slug(input.fileName)}-${data.sourceDocuments.length + 1}`;
+  const document: SourceDocument = {
+    id: baseId,
+    firmId: taxReturn.firmId,
+    clientId: taxReturn.clientId,
+    taxReturnId: returnId,
+    fileName: input.fileName,
+    documentClass: classification.documentClass,
+    taxYear: classification.taxYear ?? taxReturn.taxYear,
+    sourceType: "SOURCE_DOCUMENT",
+    uploadedBy: input.uploadedBy ?? "CLIENT",
+    receivedAt: NOW,
+    processedAt: null,
+    duplicateOfDocumentId: null,
+    storageKey: storageKeyForUploadedText(trimmedText.slice(0, 100_000)),
+    fixtureFields: [],
+    suspiciousText: null,
+  };
+  data.sourceDocuments.push(document);
+  const uploadEvent = audit(
+    data,
+    "DOCUMENT_UPLOADED",
+    `Uploaded source document ${input.fileName}.`,
+    {
+      documentId: document.id,
+      documentClass: classification.documentClass,
+      taxYear: document.taxYear,
+      uploadTextBytes: Buffer.byteLength(trimmedText, "utf8"),
+    },
+    input.uploadedBy === "FIRM_USER" ? "FIRM_USER" : "CLIENT",
+  );
+
+  const extracted = runDocumentExtraction(data, returnId);
+  return {
+    ...extracted,
+    auditEvents: [uploadEvent, ...extracted.auditEvents],
+  };
 }
 
 export function detectMissingDocuments(data: DocketData, returnId: string) {
