@@ -635,6 +635,7 @@ function buildClientDeepDiveAnswer(workbench: WorkbenchView | null, output: Reas
   const unansweredQuestions = workbench?.questions.filter((question) => question.status !== "ANSWERED") ?? [];
   const unapprovedFacts = workbench?.taxFacts.filter((fact) => fact.materiality !== "LOW" && fact.reviewStatus !== "REVIEWER_APPROVED" && fact.reviewStatus !== "PARTNER_OVERRIDE") ?? [];
   const citedIssueIds = output?.issueSummaries.flatMap((issue) => [...issue.sourceIds, ...issue.citationIds]) ?? [];
+  const allAnalyses = workbench ? fallbackProfessionalAnalyses(workbench) : output?.professionalAnalyses ?? [];
   const analyses = professionalAnalysesForAnswer(workbench, output);
   const activeAnalyses = analyses.filter((analysis) => !analysis.statusLabel.toLowerCase().startsWith("resolved"));
   const analysisQueue = activeAnalyses.length > 0 ? activeAnalyses : analyses;
@@ -658,6 +659,24 @@ function buildClientDeepDiveAnswer(workbench: WorkbenchView | null, output: Reas
     const action = clientAsk || reviewerMove;
     return `${ordinal[index] ?? "Next"}, ${analysis.title}. ${analysis.professionalJudgment} Dollar exposure: ${analysis.dollarExposure} ${action}`;
   });
+  const homeOfficeAnalysis = allAnalyses.find((analysis) => /home office/i.test(analysis.title));
+  const mileageAnalysis = allAnalyses.find((analysis) => /mileage/i.test(analysis.title));
+  const defensiveParagraphs =
+    homeOfficeAnalysis || mileageAnalysis
+      ? [
+          [
+            "Defensive layer:",
+            homeOfficeAnalysis
+              ? "home office is the kind of weak position where the default is to drop it, but if Miguel insists and can document a separately identifiable workspace, the reviewer can evaluate a reasonable-basis/Form 8275 disclosure path to reduce preparer §6694(a) and client §6662 penalty exposure."
+              : null,
+            mileageAnalysis
+              ? "Mileage is different: §274(d) is strict substantiation, so Form 8275 does not cure a missing business-purpose log. He either reconstructs trip purpose from contemporaneous calendar/email records, pivots to supported actual expenses if available, or drops unsupported miles."
+              : null,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        ]
+      : [];
   const visibleIssueCount = Math.min(analysisQueue.length || activeIssues.length, 4);
   const opening = filingBlocked
     ? `${visibleIssueCount} bucket${visibleIssueCount === 1 ? "" : "s"}, ranked by what is actually blocking or slowing the file. ${clientName} is not ready to file; the ready-to-file gate is the clearance verdict, not the readiness score.`
@@ -682,6 +701,7 @@ function buildClientDeepDiveAnswer(workbench: WorkbenchView | null, output: Reas
     answer: [
       opening,
       ...issueParagraphs,
+      ...defensiveParagraphs,
       operatingFacts,
       `Client context markers: ${contextMarkers}. ${adminCleanup}`,
     ],
@@ -2472,9 +2492,9 @@ export async function buildTaxChatResponse(question: string, returnId?: string, 
     trace("review-artifacts", "Building review artifacts", "complete", "Review artifacts are ready for the memo view.");
   }
 
-  trace("synthesis", "Drafting response with citations", "in_progress", "Writing the answer from the retrieved sources and visible Docket evidence.");
+  trace("synthesis", "Writing answer", "in_progress", "Turning the file evidence into a practitioner-facing response.");
   const answer = maybeSynthesizeWithClaude(question, draftAnswer, workbench, sourceIndex, conversationHistory);
-  trace("synthesis", "Drafting response with citations", "complete", "Response drafted with available citations and source callouts.");
+  trace("synthesis", "Writing answer", "complete", "Answer ready.");
 
   return {
     answer,

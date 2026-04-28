@@ -313,6 +313,8 @@ describe("tax research authority ranking", () => {
     expect(response.answer.professionalAnalyses?.map((analysis) => analysis.title)).toContain("Freelance income does not reconcile");
     expect(text).toContain("Freelance income does not reconcile");
     expect(text).toContain("Missing 1099-B after stock sale mention");
+    expect(text).toContain("Form 8275");
+    expect(text).toContain("§274(d)");
     expect(text).not.toContain("What view do you want");
   }, 15_000);
 

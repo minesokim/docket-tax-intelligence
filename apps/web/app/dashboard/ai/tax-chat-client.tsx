@@ -625,7 +625,7 @@ function ConversationalAnswer({ response, animate }: { response: TaxChatResponse
 
         {answer.professionalAnalyses?.length ? (
           <details className="conversation-expander">
-            <summary>Show review frame</summary>
+            <summary>Show formal review</summary>
             <div className="professional-analysis-list">
               {answer.professionalAnalyses.map((analysis) => (
                 <article className="professional-analysis-card" key={analysis.issueId}>
@@ -643,14 +643,6 @@ function ConversationalAnswer({ response, animate }: { response: TaxChatResponse
         ) : null}
 
         <div className="conversation-meta">
-          {response.reasoningTrace?.length ? <LiveReasoningPanel steps={response.reasoningTrace} live={false} /> : null}
-          {(answer.reasoningSummary.length > 0 || answer.nextSteps.length > 0) ? (
-            <details className="conversation-expander">
-              <summary>Show rationale and follow-up</summary>
-              {answer.reasoningSummary.length > 0 ? <ul>{answer.reasoningSummary.map((item) => <li key={item}>{item}</li>)}</ul> : null}
-              {answer.nextSteps.length > 0 ? <ul>{answer.nextSteps.map((item) => <li key={item}>{item}</li>)}</ul> : null}
-            </details>
-          ) : null}
           {sourceIds.length > 0 || answer.retrievedAuthority ? (
             <details className="conversation-expander">
               <summary>Show retrieval trace</summary>
