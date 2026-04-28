@@ -136,18 +136,18 @@ function isPortfolioClientQuestion(question: string): boolean {
   const normalized = normalizeForMatch(question);
   const namedClientSignal = /\b(which|who|name|names|list|show|identify|screen)\b.*\b(client|clients|returns|files)\b/.test(normalized);
   const workQueueSignal =
-    /\bwhat do i need to work on\b|\bwhat should i work on\b|\bwhere should i focus\b|\bwho needs attention\b|\bwhat needs attention\b|\bwho'?s at risk\b|\bwho is at risk\b/.test(normalized) ||
+    /\bwhat do i need to work on\b|\bwhat should i work on\b|\bwhere should i focus\b|\bwho needs attention\b|\bwhat needs attention\b|\bwho'?s at risk\b|\bwho is at risk\b|\brank my open files\b|\bopen files by urgency\b/.test(normalized) ||
     (/\b(which|what|who|rank|prioritize|triage|focus|work)\b/.test(normalized) &&
-      /\b(right now|today|this week|focus|work on|prioritize|triage|attention)\b/.test(normalized));
+      /\b(right now|today|this week|focus|work on|prioritize|triage|attention|urgency|urgent|open files)\b/.test(normalized));
   const attributeSignal =
-    /\b(everyone|anyone|who|who'?s|which|show me)\b.*\b(red issue|red flag|deadline|missing|8867|due diligence|6694|exposure|same employer|state withholding|similar fact|fact pattern)\b/.test(normalized) ||
-    /\b(6694 exposure|missing 8867|form 8867|same employer|state withholding|similar fact patterns|open red issue|open red issues|missing the deadline)\b/.test(normalized);
+    /\b(everyone|anyone|who|who'?s|which|show me|pull|rank)\b.*\b(red issue|red flag|deadline|missing|8867|due diligence|6694|exposure|same employer|state withholding|similar fact|fact pattern|audit risk|urgency|resident|residency|part-year|schedule c|eitc|highest income|income|upsell)\b/.test(normalized) ||
+    /\b(6694 exposure|missing 8867|form 8867|same employer|state withholding|similar fact patterns|open red issue|open red issues|missing the deadline|audit risk|highest audit risk|part-year residency|schedule c income|claiming eitc|highest income|upsell|cross-sell|marketing)\b/.test(normalized);
   return namedClientSignal || workQueueSignal || attributeSignal;
 }
 
 function isPortfolioComparisonQuestion(question: string): boolean {
   const normalized = normalizeForMatch(question);
-  return /\b(similar fact|fact pattern|same employer|state withholding|across the book|everyone with|anyone with|who'?s at risk|who is at risk|open red issue|missing 8867|form 8867|6694 exposure)\b/.test(normalized);
+  return /\b(similar fact|fact pattern|same employer|state withholding|across the book|everyone with|anyone with|who'?s at risk|who is at risk|open red issue|missing 8867|form 8867|6694 exposure|audit risk|urgency|open files|part-year residency|schedule c income|claiming eitc|highest income|upsell)\b/.test(normalized);
 }
 
 function shouldUseResearchTopicForPortfolio(question: string): boolean {
@@ -746,6 +746,70 @@ function openIssuesForClient(clientId: string) {
   return readDocketData().taxIssues.filter((issue) => issue.clientId === clientId && isOpenIssue(issue));
 }
 
+function clientDocuments(clientId: string) {
+  return readDocketData().sourceDocuments.filter((document) => document.clientId === clientId);
+}
+
+function clientTaxReturn(clientId: string) {
+  return readDocketData().taxReturns.find((taxReturn) => taxReturn.clientId === clientId) ?? null;
+}
+
+function moneyFromLine(line: string | null | undefined): number | null {
+  if (!line) return null;
+  const match = line.match(/\$?\s*(-?[0-9][0-9,]*(?:\.[0-9]{2})?)/);
+  if (!match) return null;
+  return Number((match[1] ?? "").replaceAll(",", ""));
+}
+
+function amountFromDocumentText(document: ReturnType<typeof readDocketData>["sourceDocuments"][number], pattern: RegExp): number | null {
+  return moneyFromLine(extractLine(documentText(document), pattern));
+}
+
+function scheduleCIncomeSignals(clientId: string): { amount: number; label: string; documentId: string }[] {
+  return clientDocuments(clientId)
+    .flatMap((document) => {
+      if (document.documentClass === "FORM_1099_NEC") {
+        const amount = amountFromDocumentText(document, /^Nonemployee compensation:/i);
+        return amount !== null ? [{ amount, label: `${document.fileName} Box 1 nonemployee compensation ${formatMoney(amount)}`, documentId: document.id }] : [];
+      }
+      if (document.documentClass === "FORM_1099_K") {
+        const amount = amountFromDocumentText(document, /^Gross amount:/i);
+        return amount !== null ? [{ amount, label: `${document.fileName} gross payments ${formatMoney(amount)}`, documentId: document.id }] : [];
+      }
+      return [];
+    })
+    .sort((a, b) => b.amount - a.amount);
+}
+
+function sourceBackedIncomeSignals(clientId: string): { amount: number; label: string; documentId: string }[] {
+  return clientDocuments(clientId)
+    .flatMap((document) => {
+      const add = (pattern: RegExp, label: string) => {
+        const amount = amountFromDocumentText(document, pattern);
+        return amount !== null ? [{ amount, label: `${document.fileName}: ${label} ${formatMoney(amount)}`, documentId: document.id }] : [];
+      };
+      switch (document.documentClass) {
+        case "W2":
+          return add(/^Box 1 wages:/i, "W-2 Box 1 wages");
+        case "FORM_1099_NEC":
+          return add(/^Nonemployee compensation:/i, "nonemployee compensation");
+        case "FORM_1099_K":
+          return add(/^Gross amount:/i, "gross payment card/third-party network amount");
+        case "FORM_1099_R":
+          return add(/^Taxable amount:/i, "taxable distribution");
+        case "FORM_1099_INT":
+          return add(/^Interest income:/i, "interest income");
+        case "FORM_1099_DIV":
+          return add(/^Total ordinary dividends:/i, "ordinary dividends");
+        case "SCHEDULE_K1":
+          return [...add(/^Ordinary business income:/i, "ordinary business income"), ...add(/^Net rental real estate income:/i, "net rental real estate income")];
+        default:
+          return [];
+      }
+    })
+    .sort((a, b) => b.amount - a.amount);
+}
+
 function buildGeneralPortfolioFocusList(): PortfolioCandidate[] {
   const data = readDocketData();
   return data.clients
@@ -924,6 +988,94 @@ function buildDeadlineRiskAnswer(): ChatAnswer {
     citationIds: [],
     suggestedFollowups: ["Show only clients above 75% extension risk.", "Which missing documents drive the deadline risk?", "Draft the extension workflow tasks."],
     limitation: "Deadline risk is computed from Docket workflow data. It does not prove a statutory deadline was missed.",
+  };
+}
+
+function buildUrgencyRankingAnswer(): ChatAnswer {
+  const candidates = buildGeneralPortfolioFocusList()
+    .map((candidate) => {
+      const taxReturn = candidate.returnId ? getReturnWorkbench(candidate.returnId)?.taxReturn : null;
+      return { candidate, extensionRiskScore: taxReturn?.extensionRiskScore ?? 0, readinessScore: taxReturn?.readinessScore ?? 0 };
+    })
+    .sort((a, b) => b.extensionRiskScore - a.extensionRiskScore || a.readinessScore - b.readinessScore || (b.candidate.score ?? 0) - (a.candidate.score ?? 0))
+    .map((row) => row.candidate)
+    .slice(0, 8);
+  return {
+    mode: "firm-portfolio",
+    headline: "Open-file urgency ranking.",
+    answer: [
+      `Urgency order: ${candidates.map((candidate, index) => `${index + 1}. ${candidate.name}`).join(", ")}.`,
+      ...candidates.map((candidate, index) => `${index + 1}. ${candidate.name} — ${candidate.priority}. ${candidate.reasons.join(" ")} Evidence: ${candidate.evidenceLabels.slice(0, 5).join("; ")}.`),
+      "Use this for work sequencing. Open the client file before drafting outreach or clearing a filing position.",
+    ],
+    reasoningSummary: [
+      "Urgency is based on red issues, blocker count, extension risk, readiness, missing documents, response latency, and reviewer actionability.",
+      "Urgency is not the same as audit risk or filing clearance.",
+    ],
+    nextSteps: [
+      "Start with the top HIGH file unless a statutory deadline or reviewer instruction overrides the queue.",
+      "Keep red/blocker outreach reviewer-controlled.",
+      "Open each client memo for issue-specific sources before acting.",
+    ],
+    sourceIds: candidates.map((candidate) => candidate.clientId),
+    citationIds: [],
+    suggestedFollowups: ["Show only files with blockers.", "Which urgency drivers are client-caused?", "Draft today's work queue."],
+    limitation: "Urgency is operational triage, not a final tax conclusion.",
+  };
+}
+
+function buildAuditRiskAnswer(): ChatAnswer {
+  const data = readDocketData();
+  const rows = data.clients
+    .map((client) => {
+      const taxReturn = clientTaxReturn(client.id);
+      const issues = openIssuesForClient(client.id);
+      const documents = clientDocuments(client.id);
+      const tags = client.tags.map((tag) => tag.toLowerCase());
+      const signals: string[] = [];
+      let score = 0;
+
+      const add = (points: number, signal: string) => {
+        score += points;
+        signals.push(signal);
+      };
+
+      if (issues.some((issue) => issue.issueType === "INCOME_RECONCILIATION" || issue.issueType === "FORM_1099K_OVERLAP")) add(35, "Schedule C gross receipts do not reconcile to source documents.");
+      if (issues.some((issue) => issue.issueType === "MISSING_1099_B" || issue.issueType === "CAPITAL_GAIN_REVIEW")) add(25, "Brokerage/capital transaction support needs review.");
+      if (issues.some((issue) => issue.issueType === "UNSUPPORTED_CRYPTO_TAX_LOTS")) add(30, "Digital asset tax-lot support is incomplete or out of scope.");
+      if (issues.some((issue) => issue.issueType === "MISSING_K1")) add(24, "K-1 basis/passive/at-risk treatment needs reviewer analysis.");
+      if (issues.some((issue) => issue.issueType === "MISSING_1095_A")) add(20, "Marketplace 1095-A / premium tax credit reconciliation is open.");
+      if (issues.some((issue) => issue.issueType === "STATE_RESIDENCY")) add(18, "State residency or wage allocation facts need support.");
+      if (issues.some((issue) => issue.issueType === "EDUCATION_CREDIT_SUPPORT" || issue.issueType === "DEPENDENT_CARE_SUPPORT")) add(14, "Credit-support facts need due-diligence review.");
+      if (issues.some((issue) => issue.riskLevel === "RED")) add(12, "Open red issue remains unresolved.");
+      if (documents.some((document) => document.documentClass === "FORM_1099_K")) add(8, "1099-K processor reporting is present.");
+      if (tags.includes("schedule c") || taxReturn?.returnType.toLowerCase().includes("schedule c")) add(8, "Schedule C activity is present.");
+
+      return { client, taxReturn, issues, signals: Array.from(new Set(signals)), score };
+    })
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score || (b.taxReturn?.riskLevel === "RED" ? 1 : 0) - (a.taxReturn?.riskLevel === "RED" ? 1 : 0) || a.client.displayName.localeCompare(b.client.displayName));
+
+  return {
+    mode: "firm-portfolio",
+    headline: "Audit-risk ranking for open files.",
+    answer: [
+      "Audit risk here means filing positions that need the most substantiation or reviewer attention before signature, not deadline risk.",
+      ...rows.slice(0, 8).map((row, index) => `${index + 1}. ${row.client.displayName} — audit-risk score ${row.score}. ${row.signals.join(" ")} Evidence: ${(row.issues.length ? row.issues.map((issue) => `Issue: ${issue.title}`) : [`Return state: ${row.taxReturn?.status.replaceAll("_", " ").toLowerCase() ?? "unknown"}`]).slice(0, 4).join("; ")}.`),
+    ],
+    reasoningSummary: [
+      "Ranked by source-backed issue types that commonly require audit-defense workpapers: unreconciled Schedule C receipts, missing brokerage support, crypto tax lots, K-1 limitations, ACA reconciliation, state sourcing, and due-diligence credit support.",
+      "Extension risk and response latency are not treated as audit risk unless they leave evidence gaps unresolved.",
+    ],
+    nextSteps: [
+      "Build workpapers first for the top audit-risk file's highest-scoring issue.",
+      "Do not clear a red issue until evidence, authority, and reviewer state all support the position.",
+      "Ask for client documents only from the issue-specific memo, not from this portfolio screen alone.",
+    ],
+    sourceIds: rows.slice(0, 8).map((row) => row.client.id),
+    citationIds: [],
+    suggestedFollowups: ["Show audit risk by issue type.", "Open the top audit-risk file.", "Which audit risks are Schedule C related?"],
+    limitation: "Audit-risk score is a Docket review signal; it is not an IRS audit-probability model.",
   };
 }
 
@@ -1114,8 +1266,184 @@ function buildEmployerStateWithholdingAnswer(): ChatAnswer {
   };
 }
 
+function thresholdFromQuestion(question: string, fallback: number): number {
+  const normalized = normalizeForMatch(question);
+  const kMatch = normalized.match(/(?:over|above|greater than|more than)\s+\$?\s*([0-9]+(?:\.[0-9]+)?)\s*k\b/);
+  if (kMatch) return Number(kMatch[1] ?? 0) * 1000;
+  const amountMatch = normalized.match(/(?:over|above|greater than|more than)\s+\$?\s*([0-9][0-9,]*)/);
+  if (amountMatch) return Number((amountMatch[1] ?? "").replaceAll(",", ""));
+  return fallback;
+}
+
+function buildResidencyAndScheduleCFilterAnswer(question: string): ChatAnswer {
+  const data = readDocketData();
+  const threshold = thresholdFromQuestion(question, 50000);
+  const residencyRows = data.clients
+    .map((client) => {
+      const taxReturn = clientTaxReturn(client.id);
+      const issues = openIssuesForClient(client.id).filter((issue) => issue.issueType === "STATE_RESIDENCY");
+      const householdResidency = data.householdMembers
+        .filter((member) => member.clientId === client.id)
+        .flatMap((member) => member.residencyPeriods)
+        .filter((period) => period.jurisdiction === "CA" && Boolean(period.endDate));
+      const tags = client.tags.map((tag) => tag.toLowerCase());
+      const stateDocs = clientDocuments(client.id).filter((document) => document.documentClass === "STATE_ALLOCATION_WORKPAPER");
+      const hasSignal = issues.length > 0 || householdResidency.length > 0 || stateDocs.length > 0 || tags.includes("multi-state") || tags.includes("ca/or");
+      return { client, taxReturn, issues, householdResidency, stateDocs, hasSignal };
+    })
+    .filter((row) => row.hasSignal)
+    .sort((a, b) => (b.issues.length - a.issues.length) || (b.taxReturn?.extensionRiskScore ?? 0) - (a.taxReturn?.extensionRiskScore ?? 0));
+
+  const scheduleCRows = data.clients
+    .map((client) => {
+      const taxReturn = clientTaxReturn(client.id);
+      const signals = scheduleCIncomeSignals(client.id);
+      const maxSignal = signals[0]?.amount ?? 0;
+      const hasScheduleC = client.tags.map((tag) => tag.toLowerCase()).includes("schedule c") || taxReturn?.returnType.toLowerCase().includes("schedule c") || signals.length > 0;
+      return { client, taxReturn, signals, maxSignal, hasScheduleC };
+    })
+    .filter((row) => row.hasScheduleC && row.maxSignal > threshold)
+    .sort((a, b) => b.maxSignal - a.maxSignal);
+
+  const residencyText = residencyRows.length
+    ? `CA part-year / state-allocation questions: ${residencyRows.map((row) => {
+        const facts = [
+          ...row.issues.map((issue) => issue.title),
+          ...row.householdResidency.map((period) => `CA residency period ends ${period.endDate}`),
+          ...row.stateDocs.map((document) => document.fileName),
+        ];
+        return `${row.client.displayName} (${facts.join("; ")})`;
+      }).join(" | ")}.`
+    : "No CA part-year or state-allocation files are flagged in the current roster.";
+
+  const scheduleCText = scheduleCRows.length
+    ? `Schedule C source-backed income signals over ${formatMoney(threshold)}: ${scheduleCRows.map((row) => `${row.client.displayName} (${row.signals.map((signal) => signal.label).join("; ")})`).join(" | ")}.`
+    : `No current Schedule C file has source-backed gross-receipts signals over ${formatMoney(threshold)}.`;
+
+  return {
+    mode: "firm-portfolio",
+    headline: "CA residency and Schedule C income filters.",
+    answer: [
+      residencyText,
+      scheduleCText,
+      "For Miguel, do not add the 1099-NEC and 1099-K at face value until the overlap question is resolved; the filter uses source-backed gross-receipts signals, not final Schedule C line 1.",
+    ],
+    reasoningSummary: [
+      "CA residency signals come from state-residency issues, household residency periods, state allocation workpapers, and CA/OR multi-state tags.",
+      `Schedule C threshold uses the largest source-backed gross-receipts document signal over ${formatMoney(threshold)}, not final taxable income.`,
+    ],
+    nextSteps: [
+      "Open Miguel and Hannah for state allocation before accepting state treatment.",
+      "Open Miguel and Priya for Schedule C gross receipts workpapers.",
+      "Resolve Miguel's 1099-K / 1099-NEC overlap before using a final income number.",
+    ],
+    sourceIds: Array.from(new Set([...residencyRows.map((row) => row.client.id), ...scheduleCRows.map((row) => row.client.id)])),
+    citationIds: [],
+    suggestedFollowups: ["Open the CA residency files.", "Show the Schedule C source lines.", "Draft residency questions."],
+    limitation: "This is a source-signal filter. It is not a completed Schedule C or state-residency calculation.",
+  };
+}
+
+function buildEitcDeltaAnswer(): ChatAnswer {
+  return {
+    mode: "firm-portfolio",
+    headline: "No source-backed EITC year-over-year delta is available yet.",
+    answer: [
+      "Docket does not currently store prior-year Form 1040 line 27, current-year preliminary EITC amount, or the eligibility driver fields needed to name clients who newly claim EITC.",
+      "Do not name a newly claiming EITC client until the book-wide pull includes prior-year EITC amount, current-year EITC computation, filing status, earned income, AGI, qualifying-child facts, investment income, SSN-valid-for-employment status, and disqualifiers such as Form 2555 or ineligible MFS status.",
+      "Dependent, education-credit, or childcare signals can support a Form 8867 due-diligence screen, but they cannot be promoted into an EITC year-over-year claimant list without the actual §32 inputs.",
+    ],
+    reasoningSummary: [
+      "EITC delta requires prior-year claim status and current-year computed eligibility; those fields are not present in the current roster model.",
+      "Dependent or education-credit signals can create due-diligence work, but they cannot be promoted into EITC claims without the actual §32 inputs.",
+    ],
+    nextSteps: [
+      "Add prior-year 1040 line 27 and current-year preliminary EITC fields to the portfolio query model.",
+      "Pull earned income, AGI, filing status, qualifying-child count, investment income, SSN validity, and disqualifiers for every open 1040.",
+      "Only then list who newly claims EITC and why.",
+    ],
+    sourceIds: [],
+    citationIds: [],
+    suggestedFollowups: ["Show 8867 candidates.", "Add EITC fields to the portfolio model.", "What data is needed for EITC due diligence?"],
+    limitation: "No EITC claimant list can be produced from the current data model without inventing facts.",
+  };
+}
+
+function is7216UseRestrictionRequest(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  const solicitationIntent = /\b(upsell|up-sell|cross-sell|cross sell|market|marketing|solicit|sales|sell .*services|pitch)\b/.test(normalized);
+  const taxReturnAttribute = /\b(income|refund|agi|deduction|capital gain|net worth|wealth|highest income|highest earners|large refund|tax info|return info)\b/.test(normalized);
+  return solicitationIntent && taxReturnAttribute;
+}
+
+function build7216UseRestrictionAnswer(): ChatAnswer {
+  return {
+    mode: "firm-portfolio",
+    headline: "I can't rank clients by tax-return information for upselling.",
+    answer: [
+      "Using client tax return information, such as income, refund size, deductions, or capital gains, to target marketing or upsell outreach is a §7216 use issue. Docket will not generate that client list from tax-return data without a valid taxpayer consent and firm-approved use policy.",
+      "A safer path is to build a service-needs queue from consented advisory engagements, explicit client requests, or non-tax-return workflow signals. For example: clients who already asked for planning, clients with an advisory scope in the engagement letter, or files where a reviewer created a planning task.",
+      "If the goal is tax planning inside the existing engagement, ask for that directly, such as 'which clients need estimated-tax planning based on current-year source documents?'",
+    ],
+    reasoningSummary: [
+      "The blocker is use of tax-return information for solicitation, not the mechanics of ranking income.",
+      "Tax planning tied to an existing engagement is different from marketing or upsell targeting.",
+    ],
+    nextSteps: [
+      "Confirm whether the firm has §7216-compliant consent for marketing use of tax return information before any upsell list exists.",
+      "Use engagement scope or client-requested advisory work to build a consent-safe service queue.",
+      "Ask a tax-planning question if the purpose is return-related advice rather than solicitation.",
+    ],
+    sourceIds: [],
+    citationIds: [],
+    suggestedFollowups: ["Show clients with advisory scope.", "Which clients need estimated-tax planning?", "Draft a §7216-safe consent checklist."],
+    limitation: "No client names were returned because the stated purpose was upsell targeting from tax-return information.",
+  };
+}
+
+function buildHighIncomeAnswer(): ChatAnswer {
+  const data = readDocketData();
+  const rows = data.clients
+    .map((client) => {
+      const signals = sourceBackedIncomeSignals(client.id);
+      const total = signals.reduce((sum, signal) => sum + signal.amount, 0);
+      return { client, signals, total };
+    })
+    .filter((row) => row.signals.length > 0)
+    .sort((a, b) => b.total - a.total);
+
+  return {
+    mode: "firm-portfolio",
+    headline: "Source-backed income signals by client.",
+    answer: [
+      "This ranks visible source-document income signals, not final AGI or taxable income.",
+      ...rows.slice(0, 8).map((row, index) => `${index + 1}. ${row.client.displayName} — visible income signals total ${formatMoney(row.total)}. ${row.signals.slice(0, 4).map((signal) => signal.label).join("; ")}.`),
+      "Do not use this list for marketing or upsell targeting without a valid §7216 consent and firm-approved use policy.",
+    ],
+    reasoningSummary: [
+      "Used only parsed source-document income lines currently visible in Docket.",
+      "Totals may double count processor/payer overlap and are not final return income.",
+    ],
+    nextSteps: [
+      "Use this only for return-review or tax-planning workflows inside the engagement.",
+      "Resolve Miguel's 1099-K / 1099-NEC overlap before treating his income total as final.",
+      "Do not use income ranking for solicitation without consent.",
+    ],
+    sourceIds: rows.slice(0, 8).map((row) => row.client.id),
+    citationIds: [],
+    suggestedFollowups: ["Show income source lines.", "Which clients need estimated-tax planning?", "Which income totals are not final?"],
+    limitation: "This is not a final AGI, taxable-income, or marketing list.",
+  };
+}
+
 function buildSpecificPortfolioAnswer(question: string): ChatAnswer | null {
   const normalized = normalizeForMatch(question);
+  if (is7216UseRestrictionRequest(question)) return build7216UseRestrictionAnswer();
+  if (/eitc|earned income credit|earned income tax credit/.test(normalized)) return buildEitcDeltaAnswer();
+  if (/audit risk|irs scrutiny|audit/.test(normalized)) return buildAuditRiskAnswer();
+  if (/urgency|urgent|rank my open files|open files/.test(normalized)) return buildUrgencyRankingAnswer();
+  if (/part-year|part year|residency|resident|schedule c income|schedule c.*over|over.*schedule c/.test(normalized)) return buildResidencyAndScheduleCFilterAnswer(question);
+  if (/highest income|income.*highest|highest earners|rank.*income/.test(normalized)) return buildHighIncomeAnswer();
   if (/same employer|state withholding/.test(normalized)) return buildEmployerStateWithholdingAnswer();
   if (/similar fact|fact pattern/.test(normalized)) return buildSimilarFactPatternAnswer(question);
   if (/red issue|red flag|6694|8867|due diligence/.test(normalized)) return buildRedIssueAndComplianceAnswer(question);

@@ -149,6 +149,71 @@ describe("tax research authority ranking", () => {
     expect(text).not.toContain("Issues, ranked by filing impact");
   }, 15_000);
 
+  it("ranks open files by urgency in portfolio mode without appending Miguel's issue stack", async () => {
+    const response = await buildTaxChatResponse("Rank my open files by urgency.", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.contextReturnId).toBeNull();
+    expect(response.answer.artifacts).toBeUndefined();
+    expect(response.answer.headline).toContain("urgency");
+    expect(text).toContain("1. Omar Haddad");
+    expect(text).toContain("Omar Haddad");
+    expect(text).toContain("2. Miguel Sandoval");
+    expect(text).not.toContain("Issues, ranked by filing impact");
+  }, 15_000);
+
+  it("answers audit-risk portfolio questions with audit signals instead of the default urgency queue", async () => {
+    const response = await buildTaxChatResponse("Which clients have the highest audit risk going into filing?", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.contextReturnId).toBeNull();
+    expect(response.answer.headline).toContain("Audit-risk");
+    expect(text).toContain("Audit risk here means filing positions");
+    expect(text).toContain("Schedule C gross receipts do not reconcile");
+    expect(text).toContain("Digital asset tax-lot support");
+    expect(text).not.toContain("Highest-priority files right now");
+  }, 15_000);
+
+  it("applies compound portfolio filters for CA residency and Schedule C income over a threshold", async () => {
+    const response = await buildTaxChatResponse("Which of my files have CA part-year residency questions and also Pull a list of clients with Schedule C income over $50K.");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.answer.headline).toContain("CA residency");
+    expect(text).toContain("Miguel Sandoval");
+    expect(text).toContain("Hannah Kim");
+    expect(text).toContain("Priya Narayan");
+    expect(text).toContain("Schedule C source-backed income signals over $50,000");
+    expect(text).not.toContain("Highest-priority files right now");
+  }, 15_000);
+
+  it("keeps EITC year-over-year deltas in portfolio mode and refuses to invent missing fields", async () => {
+    const response = await buildTaxChatResponse("Who's claiming EITC this year and didn't last year? Why?", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.contextReturnId).toBeNull();
+    expect(response.answer.headline).toContain("No source-backed EITC");
+    expect(text).toContain("does not currently store prior-year Form 1040 line 27");
+    expect(text).toContain("Do not name a newly claiming EITC client");
+    expect(response.answer.artifacts).toBeUndefined();
+  }, 15_000);
+
+  it("blocks income-based upsell targeting as a 7216 use issue", async () => {
+    const response = await buildTaxChatResponse("Which of my clients has the highest income? I want to know who to upsell.");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.answer.headline).toContain("can't rank clients");
+    expect(response.answer.sourceIds).toEqual([]);
+    expect(text).toContain("§7216 use issue");
+    expect(text).toContain("without a valid taxpayer consent");
+    expect(text).not.toContain("Miguel Sandoval");
+    expect(text).not.toContain("HIGH:");
+  }, 15_000);
+
   it("answers employer and state-withholding portfolio scans from W-2 evidence", async () => {
     const response = await buildTaxChatResponse("Which clients have the same employer? Could there be coordination on state withholding?");
     const text = response.answer.answer.join("\n");
