@@ -4,6 +4,7 @@ import {
   artifactConfidence,
   contentHashForEnvelope,
   docketTools,
+  type DocketData,
   type ChatArtifactEnvelope,
   type CitationArtifact,
   type FactNode,
@@ -24,6 +25,7 @@ type OrchestratorInput = {
   question: string;
   returnId: string;
   history: ChatHistoryTurn[];
+  data?: DocketData;
 };
 type ClientFile = NonNullable<ReturnType<typeof docketTools.getClientFile>>;
 type OrchestratorWorkbench = ClientFile["workbench"];
@@ -109,8 +111,8 @@ function buildCitations(sourcePacket: SourcePacketItem[]): CitationArtifact[] {
     }));
 }
 
-function buildReconciliationTables(returnId: string, issueIds: string[]): ReconciliationTableArtifact[] {
-  const table = docketTools.buildReconciliationTable(returnId, "gross receipts income 1099 nec 1099 k client claim", issueIds[0] ?? null);
+function buildReconciliationTables(returnId: string, issueIds: string[], data?: DocketData): ReconciliationTableArtifact[] {
+  const table = docketTools.buildReconciliationTable(returnId, "gross receipts income 1099 nec 1099 k client claim", issueIds[0] ?? null, data);
   return table ? [table] : [];
 }
 
@@ -270,6 +272,7 @@ function selectRelevantSourcePacket(
   workbench: OrchestratorWorkbench,
   question: string,
   intent: OrchestratorIntent,
+  data?: DocketData,
 ): SourcePacketItem[] {
   const allowedSourceIds = new Set<string>();
   const allowedPacketIds = new Set<string>();
@@ -280,7 +283,7 @@ function selectRelevantSourcePacket(
     allowedSourceIds.add(issue.id);
     for (const sourceId of issue.sourceIds) allowedSourceIds.add(sourceId);
     for (const packetId of localAuthorityPacketIds(fullSourcePacket, issue.title, issue.issueType)) allowedPacketIds.add(packetId);
-    for (const packet of docketTools.retrieveAuthority(`${issue.title} ${issue.issueType}`, workbench.taxReturn.taxYear, workbench.taxReturn.jurisdiction)) {
+    for (const packet of docketTools.retrieveAuthority(`${issue.title} ${issue.issueType}`, workbench.taxReturn.taxYear, workbench.taxReturn.jurisdiction, data)) {
       allowedPacketIds.add(packet.id);
     }
     for (const questionItem of workbench.questions.filter((item) => item.relatedIssueId === issue.id)) allowedSourceIds.add(questionItem.id);
@@ -307,14 +310,14 @@ function selectRelevantSourcePacket(
 }
 
 export function runTaxChatOrchestrator(input: OrchestratorInput): ChatArtifactEnvelope {
-  const clientFile = docketTools.getClientFile({ returnId: input.returnId });
+  const clientFile = docketTools.getClientFile({ returnId: input.returnId }, input.data);
   if (!clientFile) throw new Error(`No return found for orchestrator returnId ${input.returnId}`);
 
   const { workbench, sourcePacket: fullSourcePacket, factGraph } = clientFile;
   const intent = classifyIntent(input.question);
   const activeIssues = workbench.issues.filter((issue) => issue.status !== "RESOLVED" && issue.status !== "WAIVED_BY_REVIEWER");
   const selectedIssues = intent === "client_lookup" ? [] : activeIssues.slice(0, intent === "client_status" ? 2 : 6);
-  const sourcePacket = selectRelevantSourcePacket(fullSourcePacket, selectedIssues, workbench, input.question, intent);
+  const sourcePacket = selectRelevantSourcePacket(fullSourcePacket, selectedIssues, workbench, input.question, intent, input.data);
   const traces: OrchestrationTraceEvent[] = [
     trace("intent", `Classified prompt as ${intent}.`, null, input.question),
     trace("context", `Loaded ${workbench.client?.displayName ?? "client"} return context.`, "getClientFile", input.returnId, sourcePacket.slice(0, 6).map((packet) => packet.id)),
@@ -331,7 +334,7 @@ export function runTaxChatOrchestrator(input: OrchestratorInput): ChatArtifactEn
       blocker: issue.blocker,
     }),
   );
-  const readyToFileGate = docketTools.runReviewGateCheck(input.returnId);
+  const readyToFileGate = docketTools.runReviewGateCheck(input.returnId, "READY_TO_FILE", input.data);
   const issuePackets = buildIssueReasoningPackets({
     workbench,
     selectedIssues,
@@ -410,7 +413,7 @@ export function runTaxChatOrchestrator(input: OrchestratorInput): ChatArtifactEn
 
   const citations = buildCitations(sourcePacket);
   const reconciliationTables = intent === "reconciliation" || selectedIssues.some((issue) => /INCOME|1099/i.test(issue.issueType))
-    ? buildReconciliationTables(input.returnId, selectedIssues.map((issue) => issue.id))
+    ? buildReconciliationTables(input.returnId, selectedIssues.map((issue) => issue.id), input.data)
     : [];
   traces.push(trace("cross_issue_checks", `Review gate pass=${readyToFileGate.pass}; blocker count=${readyToFileGate.blockers.length}.`, "runReviewGateCheck", input.returnId, sourcePacket.filter((packet) => packet.sourceType === "review_gate").map((packet) => packet.id)));
 
