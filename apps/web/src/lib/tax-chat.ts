@@ -140,14 +140,14 @@ function isPortfolioClientQuestion(question: string): boolean {
     (/\b(which|what|who|rank|prioritize|triage|focus|work)\b/.test(normalized) &&
       /\b(right now|today|this week|focus|work on|prioritize|triage|attention|urgency|urgent|open files)\b/.test(normalized));
   const attributeSignal =
-    /\b(everyone|anyone|who|who'?s|which|show me|pull|rank)\b.*\b(red issue|red flag|deadline|missing|8867|due diligence|6694|exposure|same employer|state withholding|similar fact|fact pattern|audit risk|urgency|resident|residency|part-year|schedule c|eitc|highest income|income|upsell)\b/.test(normalized) ||
-    /\b(6694 exposure|missing 8867|form 8867|same employer|state withholding|similar fact patterns|open red issue|open red issues|missing the deadline|audit risk|highest audit risk|part-year residency|schedule c income|claiming eitc|highest income|upsell|cross-sell|marketing)\b/.test(normalized);
+    /\b(everyone|anyone|who|who'?s|which|show me|pull|rank)\b.*\b(red issue|red flag|deadline|missing|8867|due diligence|6694|exposure|same employer|state withholding|similar fact|fact pattern|audit risk|urgency|resident|residency|part-year|schedule c|eitc|fbar|foreign account|foreign accounts|foreign financial|form 8938|fincen|highest income|income|upsell)\b/.test(normalized) ||
+    /\b(6694 exposure|missing 8867|form 8867|same employer|state withholding|similar fact patterns|open red issue|open red issues|missing the deadline|audit risk|highest audit risk|part-year residency|schedule c income|claiming eitc|fbar|foreign account|foreign accounts|foreign financial account|form 8938|fincen 114|highest income|upsell|cross-sell|marketing)\b/.test(normalized);
   return namedClientSignal || workQueueSignal || attributeSignal;
 }
 
 function isPortfolioComparisonQuestion(question: string): boolean {
   const normalized = normalizeForMatch(question);
-  return /\b(similar fact|fact pattern|same employer|state withholding|across the book|everyone with|anyone with|who'?s at risk|who is at risk|open red issue|missing 8867|form 8867|6694 exposure|audit risk|urgency|open files|part-year residency|schedule c income|claiming eitc|highest income|upsell)\b/.test(normalized);
+  return /\b(similar fact|fact pattern|same employer|state withholding|across the book|everyone with|anyone with|who'?s at risk|who is at risk|open red issue|missing 8867|form 8867|6694 exposure|audit risk|urgency|open files|part-year residency|schedule c income|claiming eitc|fbar|foreign account|foreign accounts|foreign financial|form 8938|fincen|highest income|upsell)\b/.test(normalized);
 }
 
 function shouldUseResearchTopicForPortfolio(question: string): boolean {
@@ -1436,25 +1436,139 @@ function buildHighIncomeAnswer(): ChatAnswer {
   };
 }
 
-function buildSpecificPortfolioAnswer(question: string): ChatAnswer | null {
+function buildForeignAccountExposureAnswer(): ChatAnswer {
+  const data = readDocketData();
+  const foreignSignalPattern = /\b(fbar|fincen|8938|foreign account|foreign financial|foreign bank|signature authority|foreign trust|schedule b part iii)\b/i;
+  const rows = data.clients
+    .map((client) => {
+      const issues = openIssuesForClient(client.id);
+      const documents = clientDocuments(client.id);
+      const missingDocuments = data.missingDocuments.filter((document) => document.clientId === client.id && document.status !== "RECEIVED" && document.status !== "WAIVED");
+      const signals = [
+        ...client.tags.filter((tag) => foreignSignalPattern.test(tag)).map((tag) => `tag: ${tag}`),
+        ...issues
+          .filter((issue) => foreignSignalPattern.test(`${issue.issueType} ${issue.title} ${issue.description}`))
+          .map((issue) => `issue: ${issue.title}`),
+        ...documents
+          .filter((document) => foreignSignalPattern.test(`${document.fileName} ${document.documentClass} ${documentText(document)}`))
+          .map((document) => `document: ${document.fileName}`),
+        ...missingDocuments
+          .filter((document) => foreignSignalPattern.test(`${document.expectedDocumentClass} ${document.reason}`))
+          .map((document) => `missing document: ${document.expectedDocumentClass.replaceAll("_", " ")}`),
+      ];
+      return { client, signals: Array.from(new Set(signals)) };
+    })
+    .filter((row) => row.signals.length > 0)
+    .sort((a, b) => a.client.displayName.localeCompare(b.client.displayName));
+
+  const hasExplicitFbarField = false;
+  return {
+    mode: "firm-portfolio",
+    headline: rows.length ? "Foreign-account / FBAR exposure candidates." : "No source-backed foreign-account or FBAR signals found.",
+    answer: rows.length
+      ? [
+          `Foreign-account / FBAR candidates: ${rows.map((row) => `${row.client.displayName} (${row.signals.join("; ")})`).join(" | ")}.`,
+          "Treat this as a screening queue only. Confirm the client's foreign-account intake answers, maximum aggregate value, signature-authority facts, Form 8938 posture, and any prior-year FinCEN 114 history before giving advice.",
+        ]
+      : [
+          "No client in the current Docket roster has a source-backed foreign-account, FBAR, FinCEN 114, or Form 8938 signal in tags, open issues, missing-document records, document names, or extracted document text.",
+          "That is not the same as an affirmative no-FBAR conclusion. The roster does not yet store a dedicated foreign-account intake answer, prior-year FinCEN 114 status, prior-year Form 8938 status, maximum aggregate foreign-account value, or signature-authority field.",
+          "I will not substitute the generic urgency queue for this screen. Add the foreign-account intake fields, or open a specific client file if the signal lives in a document that is not yet tagged or extracted.",
+        ],
+    reasoningSummary: [
+      "Ran the foreign-account screen against structured roster fields and extracted source-document text.",
+      hasExplicitFbarField ? "Explicit FBAR fields are available." : "No explicit FBAR/Form 8938 intake field exists in the current roster model, so a zero-match screen is an intake-gap result rather than a tax conclusion.",
+    ],
+    nextSteps: [
+      "Add first-class fields for foreign-account intake answer, maximum aggregate foreign-account value, signature authority, prior-year FinCEN 114, and prior-year Form 8938.",
+      "Ask the FBAR/8938 organizer question before treating any file as cleared.",
+      "For any client with a yes/unknown answer, open the client file and run a source-backed FBAR/Form 8938 review.",
+    ],
+    sourceIds: rows.map((row) => row.client.id),
+    citationIds: [],
+    suggestedFollowups: ["Add FBAR intake fields.", "Show clients with foreign income documents.", "Draft the FBAR organizer question."],
+    limitation: "This is a roster signal screen, not a legal conclusion that no FBAR or Form 8938 filing is required.",
+  };
+}
+
+type PortfolioFilterDefinition = {
+  id: string;
+  patterns: RegExp[];
+  build: (question: string) => ChatAnswer;
+};
+
+function portfolioFilterRegistry(): PortfolioFilterDefinition[] {
+  return [
+    { id: "section_7216_use_restriction", patterns: [], build: build7216UseRestrictionAnswer },
+    { id: "eitc_delta", patterns: [/\beitc\b|earned income credit|earned income tax credit/], build: buildEitcDeltaAnswer },
+    { id: "foreign_account_fbar", patterns: [/\bfbar\b|foreign account|foreign accounts|foreign financial|form 8938|\b8938\b|fincen|foreign bank|signature authority/], build: () => buildForeignAccountExposureAnswer() },
+    { id: "audit_risk", patterns: [/audit risk|irs scrutiny|\baudit\b/], build: buildAuditRiskAnswer },
+    { id: "urgency", patterns: [/urgency|urgent|rank my open files|open files/], build: buildUrgencyRankingAnswer },
+    { id: "residency_schedule_c", patterns: [/part-year|part year|residency|resident|schedule c income|schedule c.*over|over.*schedule c/], build: buildResidencyAndScheduleCFilterAnswer },
+    { id: "highest_income", patterns: [/highest income|income.*highest|highest earners|rank.*income/], build: buildHighIncomeAnswer },
+    { id: "same_employer_state_withholding", patterns: [/same employer|state withholding/], build: buildEmployerStateWithholdingAnswer },
+    { id: "similar_fact_pattern", patterns: [/similar fact|fact pattern/], build: buildSimilarFactPatternAnswer },
+    { id: "red_6694_8867", patterns: [/red issue|red flag|6694|8867|due diligence/], build: buildRedIssueAndComplianceAnswer },
+    { id: "deadline_risk", patterns: [/deadline|missing the deadline|who'?s at risk|who is at risk/], build: buildDeadlineRiskAnswer },
+  ];
+}
+
+function parsePortfolioFilter(question: string): PortfolioFilterDefinition | null {
+  if (is7216UseRestrictionRequest(question)) return portfolioFilterRegistry().find((filter) => filter.id === "section_7216_use_restriction") ?? null;
   const normalized = normalizeForMatch(question);
-  if (is7216UseRestrictionRequest(question)) return build7216UseRestrictionAnswer();
-  if (/eitc|earned income credit|earned income tax credit/.test(normalized)) return buildEitcDeltaAnswer();
-  if (/audit risk|irs scrutiny|audit/.test(normalized)) return buildAuditRiskAnswer();
-  if (/urgency|urgent|rank my open files|open files/.test(normalized)) return buildUrgencyRankingAnswer();
-  if (/part-year|part year|residency|resident|schedule c income|schedule c.*over|over.*schedule c/.test(normalized)) return buildResidencyAndScheduleCFilterAnswer(question);
-  if (/highest income|income.*highest|highest earners|rank.*income/.test(normalized)) return buildHighIncomeAnswer();
-  if (/same employer|state withholding/.test(normalized)) return buildEmployerStateWithholdingAnswer();
-  if (/similar fact|fact pattern/.test(normalized)) return buildSimilarFactPatternAnswer(question);
-  if (/red issue|red flag|6694|8867|due diligence/.test(normalized)) return buildRedIssueAndComplianceAnswer(question);
-  if (/deadline|missing the deadline|who'?s at risk|who is at risk/.test(normalized)) return buildDeadlineRiskAnswer();
-  return null;
+  return portfolioFilterRegistry().find((filter) => filter.patterns.some((pattern) => pattern.test(normalized))) ?? null;
+}
+
+function isGenericPortfolioQueueRequest(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  return (
+    /\bwhat do i need to work on\b|\bwhat should i work on\b|\bwhere should i focus\b|\bwho needs attention\b|\bwhat needs attention\b|\bprioritize\b|\btriage\b/.test(normalized) ||
+    (/\b(which|who|what)\b/.test(normalized) && /\b(focus|work on|attention|right now|today|this week|prioritize|triage)\b/.test(normalized)) ||
+    (/\b(rank|show|list)\b/.test(normalized) && /\b(open files|work queue|focus queue|urgency)\b/.test(normalized))
+  );
+}
+
+function isSpecificPortfolioFilterRequest(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  if (isGenericPortfolioQueueRequest(question)) return false;
+  if (!/\b(which|who|who'?s|show|list|pull|rank|screen|identify|everyone|anyone)\b/.test(normalized)) return false;
+  return /\b(client|clients|file|files|return|returns|book|portfolio)\b/.test(normalized) || /\b(exposure|missing|claiming|with|have|has)\b/.test(normalized);
+}
+
+function buildUnsupportedPortfolioFilterAnswer(question: string): ChatAnswer {
+  return {
+    mode: "firm-portfolio",
+    headline: "No supported portfolio filter is available for that screen.",
+    answer: [
+      "I do not have a source-backed portfolio filter for that specific screen in the current roster model, so I will not substitute the generic urgency queue.",
+      `Requested screen: "${question.trim()}".`,
+      "To support this, Docket needs a named filter with the fields to inspect, the source hierarchy, and the no-match behavior. Once that exists, the answer can be either a real client list or a clean zero-result/gap callout.",
+    ],
+    reasoningSummary: [
+      "The prompt is a specific cross-client filter request, not a generic work-queue request.",
+      "No registered filter matched the requested screen, so the safe behavior is to stop instead of returning unrelated triage output.",
+    ],
+    nextSteps: [
+      "Add the requested screen to the portfolio filter registry.",
+      "Define the required structured fields and fallback source signals for that filter.",
+      "Add a regression test proving it does not fall through to the default firm queue.",
+    ],
+    sourceIds: [],
+    citationIds: [],
+    suggestedFollowups: ["Show the default work queue.", "Add this filter to the registry.", "List currently supported portfolio filters."],
+    limitation: "No client names were returned because the requested filter is not registered.",
+  };
+}
+
+function buildSpecificPortfolioAnswer(question: string): ChatAnswer | null {
+  return parsePortfolioFilter(question)?.build(question) ?? null;
 }
 
 async function buildPortfolioImpactAnswer(_question: string, retrievalQuestion: string): Promise<ChatAnswer> {
   const specificAnswer = buildSpecificPortfolioAnswer(_question);
   if (specificAnswer) return specificAnswer;
   const topic = shouldUseResearchTopicForPortfolio(_question) ? activeResearchTopicFromText(retrievalQuestion) : null;
+  if (!topic && isSpecificPortfolioFilterRequest(_question)) return buildUnsupportedPortfolioFilterAnswer(_question);
   if (!topic) {
     const candidates = buildGeneralPortfolioFocusList();
     const topCandidates = candidates.slice(0, 6);

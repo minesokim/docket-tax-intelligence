@@ -214,6 +214,34 @@ describe("tax research authority ranking", () => {
     expect(text).not.toContain("HIGH:");
   }, 15_000);
 
+  it("answers FBAR and foreign-account screens through a registered portfolio filter", async () => {
+    const response = await buildTaxChatResponse("Which clients have foreign accounts or potential FBAR exposure?", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.contextReturnId).toBeNull();
+    expect(response.answer.headline.toLowerCase()).toContain("foreign-account");
+    expect(response.answer.sourceIds).toEqual([]);
+    expect(text).toContain("No client in the current Docket roster has a source-backed foreign-account");
+    expect(text).toContain("not the same as an affirmative no-FBAR conclusion");
+    expect(text).not.toContain("Highest-priority files right now");
+    expect(text).not.toContain("HIGH:");
+  }, 15_000);
+
+  it("does not fall back to the generic queue for unregistered portfolio filters", async () => {
+    const response = await buildTaxChatResponse("Which clients have AMT exposure?", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.contextReturnId).toBeNull();
+    expect(response.answer.headline).toContain("No supported portfolio filter");
+    expect(response.answer.sourceIds).toEqual([]);
+    expect(text).toContain("I do not have a source-backed portfolio filter");
+    expect(text).toContain("will not substitute the generic urgency queue");
+    expect(text).not.toContain("Highest-priority files right now");
+    expect(text).not.toContain("Miguel Sandoval");
+  }, 15_000);
+
   it("answers employer and state-withholding portfolio scans from W-2 evidence", async () => {
     const response = await buildTaxChatResponse("Which clients have the same employer? Could there be coordination on state withholding?");
     const text = response.answer.answer.join("\n");
