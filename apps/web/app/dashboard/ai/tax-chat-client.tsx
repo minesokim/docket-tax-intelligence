@@ -274,7 +274,9 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
   const documentKind = isPortfolio ? "Portfolio memo" : isResearch ? "Research memo" : "Client memo";
   const metadataLine = issueCount > 0
     ? `${documentKind} · Generated just now · Reasoning: ${issueCount} issue${issueCount === 1 ? "" : "s"} analyzed · Sources linked inline`
-    : `${documentKind} · Generated just now · Authority packet: ${answer.retrievedAuthority?.sources.length ?? 0} source${(answer.retrievedAuthority?.sources.length ?? 0) === 1 ? "" : "s"} · Sources linked inline`;
+    : answer.retrievedAuthority
+      ? `${documentKind} · Generated just now · Authority packet: ${answer.retrievedAuthority.sources.length} source${answer.retrievedAuthority.sources.length === 1 ? "" : "s"} · Sources linked inline`
+      : `${documentKind} · Generated just now · Client roster screen · Sources linked inline`;
 
   return (
     <article className="chat-message assistant-message memo-message">

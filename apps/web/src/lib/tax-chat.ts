@@ -116,15 +116,46 @@ function isAmbiguousResearchFollowup(question: string): boolean {
   return /\b(this|that|these|those|it|they|affect|impact|clients|client|them)\b/.test(normalized) && meaningfulTokens.length <= 2;
 }
 
+function hasExplicitTopicNegation(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  return (
+    /\b(non|not|outside of|other than|unrelated to)\s+obbba\b/.test(normalized) ||
+    /\bnon obbba\b|\bnot obbba\b|\bnot about obbba\b/.test(normalized)
+  );
+}
+
+function isTopicPivotAway(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  return (
+    hasExplicitTopicNegation(question) ||
+    /\b(in general|generally|just in general|overall|right now|today|this week)\b/.test(normalized)
+  );
+}
+
 function isPortfolioClientQuestion(question: string): boolean {
   const normalized = normalizeForMatch(question);
-  return /\b(which|what|who|name|names|list|show|identify)\b/.test(normalized) && /\b(my|our|firm|book|client|clients|roster)\b/.test(normalized);
+  const namedClientSignal = /\b(which|who|name|names|list|show|identify|screen)\b.*\b(client|clients|returns|files)\b/.test(normalized);
+  const workQueueSignal =
+    /\bwhat do i need to work on\b|\bwhat should i work on\b|\bwhere should i focus\b|\bwho needs attention\b|\bwhat needs attention\b/.test(normalized) ||
+    (/\b(which|what|who|rank|prioritize|triage|focus|work)\b/.test(normalized) &&
+      /\b(right now|today|this week|focus|work on|prioritize|triage|attention)\b/.test(normalized));
+  return namedClientSignal || workQueueSignal;
+}
+
+function shouldUseResearchTopicForPortfolio(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  if (hasExplicitTopicNegation(question)) return false;
+  if (activeResearchTopicFromText(question)) return true;
+  if (isTopicPivotAway(question)) return false;
+  return /\b(affect|affected|impact|eligible|screen|exposure|provision|by it|this|that|these|those)\b/.test(normalized);
 }
 
 export function researchRetrievalQuery(question: string, history: ChatHistoryTurn[]): string {
   const directTopic = activeResearchTopicFromText(question);
   if (directTopic) return question;
+  if (isTopicPivotAway(question)) return question;
   if (!isAmbiguousResearchFollowup(question) && !isPortfolioClientQuestion(question)) return question;
+  if (isPortfolioClientQuestion(question) && !shouldUseResearchTopicForPortfolio(question)) return question;
 
   const recentTopic = [...history]
     .reverse()
@@ -134,6 +165,9 @@ export function researchRetrievalQuery(question: string, history: ChatHistoryTur
 }
 
 function resolveWorkbench(question: string, explicitReturnId?: string, history: ChatHistoryTurn[] = []): WorkbenchView | null {
+  if (isPortfolioClientQuestion(question) && !mentionsKnownClient(question)) {
+    return null;
+  }
   if (explicitReturnId && isGeneralResearchQuestion(question) && !mentionsKnownClient(question)) {
     return null;
   }
@@ -550,56 +584,143 @@ type PortfolioCandidate = {
   priority: "HIGH" | "MEDIUM" | "MONITOR";
   reasons: string[];
   evidenceLabels: string[];
+  score?: number;
 };
 
-function buildPortfolioCandidateList(): PortfolioCandidate[] {
+function isOpenIssue(issue: WorkbenchIssue | { status: string }): boolean {
+  return issue.status !== "RESOLVED" && issue.status !== "WAIVED_BY_REVIEWER";
+}
+
+function buildGeneralPortfolioFocusList(): PortfolioCandidate[] {
   const data = readDocketData();
+  return data.clients
+    .map((client) => {
+      const taxReturn = data.taxReturns.find((returnRecord) => returnRecord.clientId === client.id) ?? null;
+      const issues = data.taxIssues.filter((issue) => issue.clientId === client.id && isOpenIssue(issue));
+      const redIssues = issues.filter((issue) => issue.riskLevel === "RED");
+      const blockerIssues = issues.filter((issue) => issue.blocker);
+      const missingDocuments = data.missingDocuments.filter((document) => document.clientId === client.id && document.status !== "RECEIVED" && document.status !== "WAIVED");
+      const documents = data.sourceDocuments.filter((document) => document.clientId === client.id);
+      const readiness = taxReturn?.readinessScore ?? 0;
+      const extensionRisk = taxReturn?.extensionRiskScore ?? 0;
+      const reasons: string[] = [];
+      const evidenceLabels: string[] = [
+        `Return state: ${taxReturn?.status.replaceAll("_", " ").toLowerCase() ?? "no active return"}; readiness ${readiness}%; extension risk ${extensionRisk}%.`,
+        `Client profile: ${client.tags.join(", ")}; average response time ${client.averageResponseDays} days.`,
+      ];
+
+      if (redIssues.length > 0) reasons.push(`${redIssues.length} open red issue(s), including ${redIssues.slice(0, 2).map((issue) => issue.title).join("; ")}.`);
+      if (blockerIssues.length > 0) reasons.push(`${blockerIssues.length} filing blocker(s) need reviewer-controlled resolution.`);
+      if (extensionRisk >= 75) reasons.push(`High extension risk at ${extensionRisk}%.`);
+      else if (extensionRisk >= 45) reasons.push(`Moderate extension risk at ${extensionRisk}%.`);
+      if (readiness <= 60) reasons.push(`Low workflow readiness at ${readiness}%.`);
+      if (missingDocuments.length > 0) reasons.push(`Open missing-document signal(s): ${missingDocuments.map((document) => document.expectedDocumentClass.replaceAll("_", " ")).join(", ")}.`);
+      if (client.averageResponseDays >= 4) reasons.push(`Slow responder pattern (${client.averageResponseDays} day average) increases deadline risk.`);
+      if (redIssues.length === 0 && blockerIssues.length === 0 && extensionRisk < 45 && readiness >= 80) {
+        reasons.push("Monitor only: file is comparatively clean, so it should not pull attention away from red/blocker returns.");
+      }
+
+      evidenceLabels.push(...issues.slice(0, 4).map((issue) => `Issue: ${issue.title} (${issue.riskLevel}${issue.blocker ? ", blocker" : ""})`));
+      evidenceLabels.push(...missingDocuments.slice(0, 3).map((document) => `Missing document: ${document.expectedDocumentClass.replaceAll("_", " ")} — ${document.reason}`));
+      evidenceLabels.push(...documents.slice(0, 3).map((document) => document.fileName));
+
+      const score =
+        redIssues.length * 35 +
+        blockerIssues.length * 30 +
+        Math.max(0, extensionRisk - 40) +
+        Math.max(0, 75 - readiness) +
+        missingDocuments.length * 18 +
+        (client.averageResponseDays >= 4 ? 12 : 0);
+      const priority: PortfolioCandidate["priority"] = score >= 85 ? "HIGH" : score >= 45 ? "MEDIUM" : "MONITOR";
+
+      return {
+        clientId: client.id,
+        returnId: taxReturn?.id ?? null,
+        name: client.displayName,
+        priority,
+        reasons,
+        evidenceLabels: Array.from(new Set(evidenceLabels)).slice(0, 8),
+        score,
+      };
+    })
+    .filter((candidate) => candidate.reasons.length > 0)
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.name.localeCompare(b.name));
+}
+
+function buildTopicPortfolioCandidateList(topic: string): PortfolioCandidate[] {
+  const data = readDocketData();
+  const normalizedTopic = normalizeForMatch(topic);
   return data.clients
     .map((client) => {
       const taxReturn = data.taxReturns.find((returnRecord) => returnRecord.clientId === client.id) ?? null;
       const documents = data.sourceDocuments.filter((document) => document.clientId === client.id);
       const issues = data.taxIssues.filter((issue) => issue.clientId === client.id);
+      const opportunities = data.deductionOpportunities.filter((opportunity) => opportunity.clientId === client.id);
+      const priorYearPatterns = data.priorYearPatterns.filter((pattern) => pattern.clientId === client.id);
       const tags = client.tags.map((tag) => tag.toLowerCase());
       const documentClasses = new Set(documents.map((document) => document.documentClass));
       const reasons: string[] = [];
       const evidenceLabels = [`Client profile: ${client.tags.join(", ")}`];
 
-      if (tags.includes("retired") || documentClasses.has("FORM_1099_R")) {
-        reasons.push("Senior/retirement-income screen: possible Enhanced Senior Deduction and MAGI documentation review.");
-        evidenceLabels.push(...documents.filter((document) => document.documentClass === "FORM_1099_R" || document.documentClass === "FORM_1099_INT").map((document) => document.fileName));
+      if (normalizedTopic.includes("obbba") || normalizedTopic.includes("public law 119-21")) {
+        if (tags.includes("retired") || documentClasses.has("FORM_1099_R")) {
+          reasons.push("Senior/retirement-income screen: possible Enhanced Senior Deduction and MAGI documentation review.");
+          evidenceLabels.push(...documents.filter((document) => document.documentClass === "FORM_1099_R" || document.documentClass === "FORM_1099_INT").map((document) => document.fileName));
+        }
+        if (tags.includes("schedule c") || taxReturn?.returnType.toLowerCase().includes("schedule c") || documentClasses.has("FORM_1099_NEC") || documentClasses.has("FORM_1099_K")) {
+          reasons.push("Schedule C/self-employed screen: review business/worker provisions, reporting transition relief, and client organizer updates.");
+          evidenceLabels.push(...documents.filter((document) => ["FORM_1099_NEC", "FORM_1099_K", "BUSINESS_EXPENSE_SUMMARY"].includes(document.documentClass)).map((document) => document.fileName));
+        }
+        if (tags.includes("marketplace insurance") || documentClasses.has("FORM_1095_A")) {
+          reasons.push("Healthcare/ACA screen: healthcare provisions require separate source review before client-facing advice.");
+          evidenceLabels.push(...documents.filter((document) => document.documentClass === "FORM_1095_A").map((document) => document.fileName));
+        }
+        if (tags.some((tag) => tag.includes("k-1")) || documentClasses.has("SCHEDULE_K1") || taxReturn?.returnType.toLowerCase().includes("rental")) {
+          reasons.push("Pass-through/rental/business screen: provision-by-provision business impact review needed; do not automate basis/passive conclusions.");
+          evidenceLabels.push(...documents.filter((document) => document.documentClass === "SCHEDULE_K1" || document.documentClass === "FORM_1098").map((document) => document.fileName));
+        }
+        if (tags.includes("dependent") || tags.includes("childcare") || documentClasses.has("FORM_1098_T") || documentClasses.has("DEPENDENT_CARE_STATEMENT")) {
+          reasons.push("Family/dependent screen: monitor family/dependent provisions and update organizer questions before planning outreach.");
+          evidenceLabels.push(...documents.filter((document) => document.documentClass === "FORM_1098_T" || document.documentClass === "DEPENDENT_CARE_STATEMENT").map((document) => document.fileName));
+        }
+      } else if (normalizedTopic.includes("home office")) {
+        if (issues.some((issue) => issue.issueType === "HOME_OFFICE_SUBSTANTIATION") || opportunities.some((opportunity) => opportunity.opportunityType === "HOME_OFFICE") || tags.includes("schedule c")) {
+          reasons.push("Home office screen: Schedule C or home-office signal exists; exclusive and regular use need file-specific verification.");
+          evidenceLabels.push(...issues.filter((issue) => issue.issueType === "HOME_OFFICE_SUBSTANTIATION").map((issue) => `Issue: ${issue.title}`));
+        }
+      } else if (normalizedTopic.includes("mileage") || normalizedTopic.includes("vehicle expense")) {
+        if (issues.some((issue) => issue.issueType === "MILEAGE_SUBSTANTIATION") || opportunities.some((opportunity) => opportunity.opportunityType === "BUSINESS_MILEAGE") || documentClasses.has("MILEAGE_LOG") || tags.includes("schedule c")) {
+          reasons.push("Mileage/vehicle screen: business activity or mileage support exists; substantiation and business-purpose records need review.");
+          evidenceLabels.push(...documents.filter((document) => document.documentClass === "MILEAGE_LOG").map((document) => document.fileName));
+        }
+      } else if (normalizedTopic.includes("1099-b") || normalizedTopic.includes("stock sale") || normalizedTopic.includes("capital gain")) {
+        if (issues.some((issue) => issue.issueType === "MISSING_1099_B") || documentClasses.has("FORM_1099_B") || tags.includes("brokerage") || priorYearPatterns.some((pattern) => pattern.expectedCurrentYearDocumentClass === "FORM_1099_B")) {
+          reasons.push("Brokerage/capital-gain screen: stock-sale or brokerage pattern exists; proceeds, basis, holding period, and wash-sale support need review.");
+          evidenceLabels.push(...documents.filter((document) => document.documentClass === "FORM_1099_B").map((document) => document.fileName));
+        }
+      } else if (normalizedTopic.includes("1095-a") || normalizedTopic.includes("marketplace insurance") || normalizedTopic.includes("premium tax credit")) {
+        if (issues.some((issue) => issue.issueType.includes("1095") || issue.issueType.includes("ACA")) || documentClasses.has("FORM_1095_A") || tags.includes("marketplace insurance")) {
+          reasons.push("Marketplace/1095-A screen: ACA premium tax credit facts need MAGI and Form 8962 review before client-facing conclusions.");
+          evidenceLabels.push(...documents.filter((document) => document.documentClass === "FORM_1095_A").map((document) => document.fileName));
+        }
+      } else if (normalizedTopic.includes("crypto") || normalizedTopic.includes("digital asset")) {
+        if (issues.some((issue) => normalizeForMatch(issue.issueType).includes("crypto") || normalizeForMatch(issue.description).includes("crypto")) || tags.includes("crypto") || documentClasses.has("CRYPTO_TAX_LOT_REPORT")) {
+          reasons.push("Digital asset screen: crypto signal exists; tax-lot accounting remains unsupported automation and needs reviewer/advisory handling.");
+          evidenceLabels.push(...documents.filter((document) => document.documentClass === "CRYPTO_TAX_LOT_REPORT").map((document) => document.fileName));
+        }
+      } else if (issues.length > 0 || taxReturn) {
+        reasons.push(`General ${topic} screen: client has an active return file; open only if the provision facts match after source review.`);
       }
 
-      if (tags.includes("schedule c") || taxReturn?.returnType.toLowerCase().includes("schedule c") || documentClasses.has("FORM_1099_NEC") || documentClasses.has("FORM_1099_K")) {
-        reasons.push("Schedule C/self-employed screen: review OBBBA business/worker provisions, reporting transition relief, and client organizer updates.");
-        evidenceLabels.push(...documents.filter((document) => ["FORM_1099_NEC", "FORM_1099_K", "BUSINESS_EXPENSE_SUMMARY"].includes(document.documentClass)).map((document) => document.fileName));
+      if (reasons.length > 0 && issues.some((issue) => issue.riskLevel === "RED" && isOpenIssue(issue))) {
+        reasons.push("Open red issue already exists, so topic-related outreach should be reviewer-controlled.");
       }
 
-      if (tags.includes("marketplace insurance") || documentClasses.has("FORM_1095_A")) {
-        reasons.push("Healthcare/ACA screen: OBBBA healthcare provisions require separate source review before client-facing advice.");
-        evidenceLabels.push(...documents.filter((document) => document.documentClass === "FORM_1095_A").map((document) => document.fileName));
-      }
-
-      if (tags.some((tag) => tag.includes("k-1")) || documentClasses.has("SCHEDULE_K1") || taxReturn?.returnType.toLowerCase().includes("rental")) {
-        reasons.push("Pass-through/rental/business screen: provision-by-provision business impact review needed; do not automate basis/passive conclusions.");
-        evidenceLabels.push(...documents.filter((document) => document.documentClass === "SCHEDULE_K1" || document.documentClass === "FORM_1098").map((document) => document.fileName));
-      }
-
-      if (tags.includes("dependent") || tags.includes("childcare") || documentClasses.has("FORM_1098_T") || documentClasses.has("DEPENDENT_CARE_STATEMENT")) {
-        reasons.push("Family/dependent screen: monitor family/dependent provisions and update organizer questions before planning outreach.");
-        evidenceLabels.push(...documents.filter((document) => document.documentClass === "FORM_1098_T" || document.documentClass === "DEPENDENT_CARE_STATEMENT").map((document) => document.fileName));
-      }
-
-      if (issues.some((issue) => issue.riskLevel === "RED")) {
-        reasons.push("Open red issue already exists, so any OBBBA outreach should be reviewer-controlled.");
-      }
-
-      const priority: PortfolioCandidate["priority"] = reasons.some((reason) => reason.includes("Senior") || reason.includes("Schedule C") || reason.includes("Healthcare") || reason.includes("Pass-through"))
-        ? issues.some((issue) => issue.riskLevel === "RED") || reasons.some((reason) => reason.includes("Senior"))
+      const priority: PortfolioCandidate["priority"] = reasons.length > 0
+        ? issues.some((issue) => issue.riskLevel === "RED" && isOpenIssue(issue)) || reasons.some((reason) => reason.includes("Senior"))
           ? "HIGH"
           : "MEDIUM"
-        : reasons.length > 0
-          ? "MONITOR"
-          : "MONITOR";
+        : "MONITOR";
 
       return {
         clientId: client.id,
@@ -608,6 +729,7 @@ function buildPortfolioCandidateList(): PortfolioCandidate[] {
         priority,
         reasons,
         evidenceLabels: Array.from(new Set(evidenceLabels)).slice(0, 6),
+        score: priority === "HIGH" ? 100 : priority === "MEDIUM" ? 60 : 20,
       };
     })
     .filter((candidate) => candidate.reasons.length > 0)
@@ -618,46 +740,61 @@ function buildPortfolioCandidateList(): PortfolioCandidate[] {
 }
 
 async function buildPortfolioImpactAnswer(_question: string, retrievalQuestion: string): Promise<ChatAnswer> {
-  const topic = activeResearchTopicFromText(retrievalQuestion);
-  const candidates = buildPortfolioCandidateList();
+  const topic = shouldUseResearchTopicForPortfolio(_question) ? activeResearchTopicFromText(retrievalQuestion) : null;
+  if (!topic) {
+    const candidates = buildGeneralPortfolioFocusList();
+    const topCandidates = candidates.slice(0, 6);
+    return {
+      mode: "firm-portfolio",
+      headline: "Firm focus queue from the current Docket roster.",
+      answer: [
+        "This is a portfolio/workflow answer, not a tax-law research memo. I did not run authority retrieval because the question is about what to work on now, not about a tax conclusion.",
+        ...topCandidates.map((candidate) => `${candidate.priority}: ${candidate.name} — ${candidate.reasons.join(" ")} Evidence: ${candidate.evidenceLabels.join("; ")}.`),
+        "Use this as an internal triage queue. It should not generate client-facing tax advice by itself; open the client card when you want the file-specific memo, source packet, questions, or workpapers.",
+      ],
+      reasoningSummary: [
+        "Classified the prompt as firm portfolio/workflow because it asks which clients or returns need attention across the book.",
+        "Portfolio mode wins over a loaded client file, so an open Miguel workbench does not hijack plural roster questions.",
+        "Ranked the roster by active red issues, blocker issues, extension risk, readiness, missing documents, slow-response behavior, and reviewer actionability.",
+        "Skipped authority retrieval because this question does not ask for a tax-law conclusion; the sources used are Docket client/return records.",
+      ],
+      nextSteps: [
+        "Work HIGH items first, starting with the highest combined blocker and extension-risk score.",
+        "Open each HIGH client into a client-file memo before drafting client communications.",
+        "Keep red/blocker outreach reviewer-controlled until the specific client file clears its review gate.",
+      ],
+      sourceIds: topCandidates.map((candidate) => candidate.clientId),
+      citationIds: [],
+      suggestedFollowups: ["Open the top client's file memo.", "Show this as a screening table.", "Draft reviewer tasks for the HIGH queue.", "Which files are likely extensions?"],
+      limitation: "This is operational triage, not a client-facing tax position or filing-clearance determination.",
+    };
+  }
+
+  const candidates = buildTopicPortfolioCandidateList(topic);
   const topCandidates = candidates.slice(0, 6);
   const research = topic ? await retrieveOfficialAuthority(retrievalQuestion) : undefined;
   const sourceIds = topCandidates.map((candidate) => candidate.clientId);
 
-  if (!topic) {
-    return {
-      mode: "firm-portfolio",
-      headline: "I need an active tax topic before naming affected clients.",
-      answer: [
-        "This is a portfolio-intelligence question, not a general research question. I can scan the firm roster, but I need the tax topic to screen against first.",
-        "Ask it after a topic-specific research turn, for example: 'Which clients are affected by OBBBA?' or 'Which clients are affected by the home office issue?'",
-      ],
-      reasoningSummary: ["Blocked client-name generation because no tax topic was anchored in the prompt or recent chat history."],
-      nextSteps: ["Name the tax topic, then ask for affected clients again.", "Use a selected return if you want a single-client answer."],
-      sourceIds: [],
-      citationIds: [],
-      suggestedFollowups: ["Which clients are affected by OBBBA?", "Which clients need an OBBBA review?", "Show the OBBBA client screening matrix."],
-    };
-  }
-
   const answer: ChatAnswer = {
     mode: "firm-portfolio",
-    headline: `Named OBBBA screening candidates from the current Docket client roster.`,
+    headline: `Named screening candidates for ${topic} from the current Docket client roster.`,
     answer: [
-      "Yes. I can name screening candidates from the current Docket roster, but these are not eligibility determinations. They are clients who should be routed into an OBBBA review queue based on existing client facts, documents, issues, and tags.",
-      ...topCandidates.map((candidate) => `${candidate.priority}: ${candidate.name} — ${candidate.reasons.join(" ")} Evidence: ${candidate.evidenceLabels.join("; ")}.`),
-      "No client should receive a client-facing OBBBA number from this screen alone. The next step is provision-level review against PL 119-21, current IRS implementation guidance, the client's tax year, state conformity, and actual source documents.",
+      "Yes. I can name screening candidates from the current Docket roster, but these are not eligibility determinations. They are clients who should be routed into a provision-level review queue based on existing client facts, documents, issues, and tags.",
+      ...(topCandidates.length > 0
+        ? topCandidates.map((candidate) => `${candidate.priority}: ${candidate.name} — ${candidate.reasons.join(" ")} Evidence: ${candidate.evidenceLabels.join("; ")}.`)
+        : [`No current Docket client has enough matching file evidence to name as a ${topic} screening candidate.`]),
+      "No client should receive a client-facing number from this screen alone. The next step is provision-level review against current authority, the client's tax year, state conformity, and actual source documents.",
     ],
     reasoningSummary: [
       "Classified the prompt as firm portfolio intelligence because it asks for named clients, not another authority memo.",
       `Used the active research topic '${topic}' from the conversation before screening the roster.`,
       "Screened client tags, return type, source-document classes, and open issue severity; did not invent eligibility facts that are not in the Docket file.",
-      "Retrieved OBBBA authority only to preserve the governing topic; client names came from Docket client records, not from the model.",
+      "Retrieved authority only to preserve the governing topic; client names came from Docket client records, not from the model.",
     ],
     nextSteps: [
-      "Create an OBBBA review queue for the named clients and assign a reviewer before client outreach.",
+      `Create a ${topic} review queue for the named clients and assign a reviewer before client outreach.`,
       "For each candidate, attach the provision being screened, the client evidence, the missing facts, and the authority source.",
-      "Add intake questions for tipped occupation, auto-loan origination/interest, senior MAGI support, clean-energy placed-in-service facts, and state conformity.",
+      "Add intake questions and workpaper fields only after the provision-level authority packet is confirmed.",
     ],
     sourceIds,
     citationIds: [],

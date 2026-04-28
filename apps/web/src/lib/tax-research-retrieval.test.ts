@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { rankAuthorityCatalog } from "@docket/tax-knowledge";
 
-import { buildTaxChatResponse } from "./tax-chat";
-import { researchRetrievalQuery } from "./tax-chat";
+import { buildTaxChatResponse, researchRetrievalQuery } from "./tax-chat";
 
 describe("tax research authority ranking", () => {
   it("keeps current-law research anchored to topic-specific official authority", () => {
@@ -52,5 +51,43 @@ describe("tax research authority ranking", () => {
     expect(response.sourceIndex["client-nora-williams"]?.type).toBe("Client roster");
     expect(response.answer.retrievedAuthority?.sources.map((source) => source.id)).toContain("congress-pl119-21-obbba");
     expect(response.answer.retrievedAuthority?.sources.map((source) => source.title).join(" ")).not.toMatch(/403b|1120-L|Name After Marriage/i);
+  }, 15_000);
+
+  it("keeps broad client-impact followups in research mode instead of prematurely naming clients", async () => {
+    const response = await buildTaxChatResponse("how does it affect my clients directly?", undefined, [
+      { role: "assistant", content: "OBBBA Public Law 119-21 changed several 2025 deductions and credits." },
+    ]);
+
+    expect(response.answer.mode).toBe("general-research");
+    expect(response.answer.retrievedAuthority?.sources.map((source) => source.id)).toContain("congress-pl119-21-obbba");
+    expect(response.answer.answer.join("\n")).not.toContain("HIGH: Miguel Sandoval");
+  }, 15_000);
+
+  it("routes general focus questions to portfolio mode even when Miguel is the loaded file", async () => {
+    const response = await buildTaxChatResponse("which clients of mine do I need to focus on right now", "return-miguel-2024", [
+      { role: "assistant", content: "OBBBA Public Law 119-21 changed several 2025 deductions and credits." },
+    ]);
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.contextReturnId).toBeNull();
+    expect(response.answer.retrievedAuthority).toBeUndefined();
+    expect(response.answer.answer.join("\n")).toContain("Omar Haddad");
+    expect(response.answer.answer.join("\n")).toContain("Ben Larson");
+    expect(response.answer.artifacts).toBeUndefined();
+    expect(response.sourceIndex["client-omar-haddad"]?.type).toBe("Client roster");
+  }, 15_000);
+
+  it("releases a prior research topic when the user pivots to non-topic portfolio triage", async () => {
+    const query = researchRetrievalQuery("in general. non obbba but just in general what do I need to work on right now", [
+      { role: "assistant", content: "OBBBA Public Law 119-21 changed several 2025 deductions and credits." },
+    ]);
+    const response = await buildTaxChatResponse("in general. non obbba but just in general what do I need to work on right now", undefined, [
+      { role: "assistant", content: "OBBBA Public Law 119-21 changed several 2025 deductions and credits." },
+    ]);
+
+    expect(query).not.toContain("OBBBA Public Law 119-21 client impact");
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.answer.retrievedAuthority).toBeUndefined();
+    expect(response.answer.reasoningSummary.join(" ")).toContain("Skipped authority retrieval");
   }, 15_000);
 });
