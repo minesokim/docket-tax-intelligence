@@ -68,7 +68,24 @@ function resolveReturnIdFromText(question: string, history: ChatHistoryTurn[] = 
   return data.taxReturns.find((taxReturn) => taxReturn.clientId === client.id)?.id ?? null;
 }
 
+function mentionsKnownClient(question: string): boolean {
+  const data = readDocketData();
+  const text = normalizeForMatch(question);
+  return data.clients.some((client) => {
+    const parts = normalizeForMatch(client.displayName).split(" ").filter((part) => part.length > 2);
+    return parts.some((part) => new RegExp(`\\b${part}\\b`).test(text));
+  });
+}
+
+function isGeneralResearchQuestion(question: string): boolean {
+  const q = question.toLowerCase();
+  return /\bobbba\b|\bob3\b|one big beautiful|beautiful bill|public law|congress|irs guidance|tax law change|new tax law|current authority|research|my clients|clients broadly|client impact/.test(q);
+}
+
 function resolveWorkbench(question: string, explicitReturnId?: string, history: ChatHistoryTurn[] = []): WorkbenchView | null {
+  if (explicitReturnId && isGeneralResearchQuestion(question) && !mentionsKnownClient(question)) {
+    return null;
+  }
   const returnId = explicitReturnId ?? resolveReturnIdFromText(question, history);
   return returnId ? getReturnWorkbench(returnId) ?? null : null;
 }
@@ -727,6 +744,19 @@ function buildSourcePacket(answer: ChatAnswer, sourceIndex: Record<string, Sourc
   return [...clientSources, ...authoritySources];
 }
 
+function buildResearchSourceIndex(answer: ChatAnswer): Record<string, SourceIndexEntry> {
+  const entries: Record<string, SourceIndexEntry> = {};
+  for (const source of answer.retrievedAuthority?.sources ?? []) {
+    entries[source.id] = {
+      id: source.id,
+      type: source.publisher,
+      label: source.title,
+      detail: `${source.authorityLevel.replaceAll("_", " ")} · ${source.fetchStatus} · ${source.sourceUrl}`,
+    };
+  }
+  return entries;
+}
+
 function maybeSynthesizeWithClaude(
   question: string,
   answer: ChatAnswer,
@@ -770,8 +800,17 @@ export async function buildTaxChatResponse(question: string, returnId?: string, 
   const workbench = resolveWorkbench(question, returnId, conversationHistory);
   const hasClientContext = Boolean(workbench);
   const output = asReasoningOutputView(workbench?.latestAIReasoningRun?.output);
-  const sourceIndex = workbench?.reasoningSourceIndex ?? {};
+  let sourceIndex: Record<string, SourceIndexEntry> = {};
+  for (const [id, source] of Object.entries(workbench?.reasoningSourceIndex ?? {})) {
+    sourceIndex[id] = {
+      id: source.id,
+      type: source.type,
+      label: source.label,
+      detail: source.detail,
+    };
+  }
   const draftAnswer = await buildGroundedAnswer(question, output, hasClientContext, workbench);
+  sourceIndex = { ...sourceIndex, ...buildResearchSourceIndex(draftAnswer) };
   if (workbench) {
     draftAnswer.artifacts = runTaxChatOrchestrator({
       question,

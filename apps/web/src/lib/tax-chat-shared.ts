@@ -7,6 +7,7 @@ export type ChatHistoryTurn = {
 };
 
 export type SourceIndexEntry = {
+  id: string;
   type: string;
   label: string;
   detail: string;

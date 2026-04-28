@@ -21,7 +21,8 @@ export type KnowledgeGraphLayer =
   | "FILING_LOGIC_GRAPH"
   | "PREPARER_RISK_GRAPH"
   | "PRACTITIONER_INTERPRETATION_LAYER"
-  | "COMMUNITY_SIGNAL_LAYER";
+  | "COMMUNITY_SIGNAL_LAYER"
+  | "TAX_ADMIN_ANALYTICS_LAYER";
 
 export type SourceAuthorityRole =
   | "BINDING_AUTHORITY"
@@ -688,6 +689,42 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     ],
   },
   {
+    id: "irs-soi-public-use-statistics",
+    priority: 23,
+    name: "IRS Statistics of Income / Public-Use Data",
+    graphLayer: "TAX_ADMIN_ANALYTICS_LAYER",
+    authorityRole: "PROCEDURAL_OR_VALIDATION_SOURCE",
+    authorityWeight: 28,
+    ingestionPriority: "LATER",
+    canSupportTrustedTaxConclusion: false,
+    requiresHumanReviewBeforeGraphWrite: true,
+    sourceUrl: "https://www.irs.gov/statistics/soi-tax-stats-individual-public-use-microdata-files",
+    accessPattern: "Dataset and aggregate-statistics ingestion for benchmarking, anomaly priors, market sizing, and taxpayer-behavior modeling.",
+    updateCadence: "Annual/periodic dataset monitoring.",
+    scope: "Public-use microdata, SOI statistical tables, and aggregate IRS statistics.",
+    conflictRule: "Never legal authority; may support analytics and prioritization only.",
+    topicTags: ["statistics of income", "soi", "public use microdata", "tax statistics", "analytics", "benchmarking"],
+    notes: "Useful for analytics and model priors, not for tax-law conclusions or client-specific legal advice.",
+  },
+  {
+    id: "irs-foia-library-admin-materials",
+    priority: 24,
+    name: "IRS FOIA Library / Administrative Materials",
+    graphLayer: "TAX_ADMIN_ANALYTICS_LAYER",
+    authorityRole: "PROCEDURAL_OR_VALIDATION_SOURCE",
+    authorityWeight: 24,
+    ingestionPriority: "LATER",
+    canSupportTrustedTaxConclusion: false,
+    requiresHumanReviewBeforeGraphWrite: true,
+    sourceUrl: "https://www.irs.gov/privacy-disclosure/foia-library",
+    accessPattern: "FOIA library monitoring for administrative manuals, training materials, frequently requested records, and operational context.",
+    updateCadence: "Quarterly monitoring unless a specific enforcement/research topic is active.",
+    scope: "Supplemental IRS administrative context and records, not substantive tax authority.",
+    conflictRule: "Never outranks statute, regulations, IRB guidance, forms, instructions, or publications.",
+    topicTags: ["foia", "foia library", "administrative manuals", "training materials", "frequently requested records", "operational context"],
+    notes: "Useful supplemental corpus for IRS operations, enforcement context, and due-diligence research trails.",
+  },
+  {
     id: "affordable-practitioner-sources",
     priority: 19,
     name: "Affordable Practitioner Sources",
@@ -880,6 +917,12 @@ export const KNOWLEDGE_SOURCE_TIERS: DocketKnowledgeSourceTier[] = [
     description: "Premium editorial research systems to license later when revenue supports it.",
     sourceIds: ["premium-practitioner-research"],
   },
+  {
+    tier: 7,
+    title: "Analytics and administrative context",
+    description: "IRS statistics, public-use data, and FOIA/admin materials for analytics and operational context. These do not support legal conclusions.",
+    sourceIds: ["irs-soi-public-use-statistics", "irs-foia-library-admin-materials"],
+  },
 ];
 
 export function getKnowledgeGraphSourceRegistry(): DocketKnowledgeSource[] {
@@ -920,8 +963,10 @@ export type OfficialAuthorityDocument = {
   authorityLevel: AuthorityLevel;
   sourceUrl: string;
   jurisdiction: "US";
-  publisher: "IRS" | "Federal Register" | "eCFR";
+  publisher: "Congress.gov" | "GovInfo" | "IRS" | "Federal Register" | "eCFR";
   topicTags: string[];
+  sourceDate?: string | null;
+  discoveredBy?: "catalog" | "irs-sitemap" | "federal-register-api";
 };
 
 export type RetrievedAuthority = OfficialAuthorityDocument & {
@@ -947,6 +992,51 @@ export type AuthorityResearchResult = {
 };
 
 const OFFICIAL_AUTHORITY_CATALOG: OfficialAuthorityDocument[] = [
+  {
+    id: "congress-pl119-21-obbba",
+    title: "Public Law 119-21, One Big Beautiful Bill Act text",
+    authorityLevel: "IRC_STATUTE",
+    sourceUrl: "https://www.govinfo.gov/content/pkg/PLAW-119publ21/html/PLAW-119publ21.htm",
+    jurisdiction: "US",
+    publisher: "GovInfo",
+    topicTags: ["obbba", "ob3", "one big beautiful bill", "one big beautiful bill act", "public law 119-21", "hr 1", "h.r. 1", "tax law changes", "tcja", "2025 tax changes"],
+  },
+  {
+    id: "irs-obbba-provisions",
+    title: "One, Big, Beautiful Bill provisions",
+    authorityLevel: "IRS_FAQ",
+    sourceUrl: "https://www.irs.gov/newsroom/one-big-beautiful-bill-act-of-2025-provisions",
+    jurisdiction: "US",
+    publisher: "IRS",
+    topicTags: ["obbba", "one big beautiful bill", "public law 119-21", "irs implementation", "tax provisions", "2025 tax changes", "guidance", "notice", "revenue procedure"],
+  },
+  {
+    id: "irs-obbba-individuals-workers",
+    title: "One, Big, Beautiful Bill provisions - Individuals and workers",
+    authorityLevel: "IRS_FAQ",
+    sourceUrl: "https://www.irs.gov/newsroom/one-big-beautiful-bill-provisions-individuals-and-workers",
+    jurisdiction: "US",
+    publisher: "IRS",
+    topicTags: ["obbba", "one big beautiful bill", "individuals", "workers", "tips", "overtime", "senior deduction", "auto loan interest", "2025 tax changes"],
+  },
+  {
+    id: "irs-obbba-working-seniors-deductions",
+    title: "One, Big, Beautiful Bill Act: Tax deductions for working Americans and seniors",
+    authorityLevel: "IRS_FAQ",
+    sourceUrl: "https://www.irs.gov/newsroom/one-big-beautiful-bill-act-tax-deductions-for-working-americans-and-seniors",
+    jurisdiction: "US",
+    publisher: "IRS",
+    topicTags: ["obbba", "one big beautiful bill", "tips", "overtime", "senior deduction", "working americans", "2025 tax deductions", "transition relief"],
+  },
+  {
+    id: "irs-obbba-no-2025-information-return-changes",
+    title: "IRS announces no changes to 2025 individual information returns or withholding tables under OBBBA",
+    authorityLevel: "IRS_FAQ",
+    sourceUrl: "https://www.irs.gov/newsroom/irs-announces-no-changes-to-individual-information-returns-or-withholding-tables-for-2025-under-the-one-big-beautiful-bill-act",
+    jurisdiction: "US",
+    publisher: "IRS",
+    topicTags: ["obbba", "one big beautiful bill", "2025 information returns", "withholding tables", "w-2", "1099", "reporting", "transition relief"],
+  },
   {
     id: "irs-form-2553",
     title: "About Form 2553, Election by a Small Business Corporation",
@@ -1107,9 +1197,50 @@ function normalize(value: string): string {
 }
 
 function queryTokens(query: string): string[] {
-  const stopWords = new Set(["a", "an", "and", "are", "for", "how", "is", "of", "or", "the", "to", "what", "when", "with"]);
+  const stopWords = new Set([
+    "a",
+    "an",
+    "and",
+    "are",
+    "about",
+    "can",
+    "client",
+    "clients",
+    "does",
+    "for",
+    "from",
+    "hello",
+    "hi",
+    "how",
+    "impact",
+    "impacts",
+    "is",
+    "know",
+    "me",
+    "my",
+    "of",
+    "or",
+    "preparer",
+    "preparers",
+    "should",
+    "tell",
+    "the",
+    "this",
+    "to",
+    "under",
+    "what",
+    "when",
+    "will",
+    "with",
+    "your",
+  ]);
   return normalize(query)
     .split(" ")
+    .map((token) => {
+      if (/^ob{2,6}a$/.test(token)) return "obbba";
+      if (token.startsWith("substantiat")) return "substantiat";
+      return token;
+    })
     .filter((token) => token.length > 2 && !stopWords.has(token));
 }
 
@@ -1117,11 +1248,32 @@ function authorityRank(level: AuthorityLevel): number {
   return AUTHORITY_RANKING.indexOf(level);
 }
 
-export function rankAuthorityCatalog(query: string, catalog: OfficialAuthorityDocument[] = OFFICIAL_AUTHORITY_CATALOG): OfficialAuthorityDocument[] {
+function authoritySearchScore(query: string, source: OfficialAuthorityDocument): { score: number; relevanceScore: number } {
   const normalizedQuery = normalize(query);
   const tokens = queryTokens(query);
+  const haystack = normalize(`${source.title} ${source.topicTags.join(" ")}`);
+  const tokenScore = tokens.reduce((score, token) => score + (haystack.includes(token) ? (/\d/.test(token) ? 5 : 2) : 0), 0);
+  const phraseScore = source.topicTags.reduce((score, tag) => {
+    const normalizedTag = normalize(tag);
+    const isSpecificPhrase = normalizedTag.includes(" ") || /\d/.test(normalizedTag);
+    return score + (isSpecificPhrase && normalizedQuery.includes(normalizedTag) ? 8 : 0);
+  }, 0);
+  const exactTitleScore = normalize(source.title)
+    .split(" ")
+    .some((titleToken) => tokens.includes(titleToken))
+    ? 1.5
+    : 0;
+  const urlScore = tokens.reduce((score, token) => score + (normalize(source.sourceUrl).includes(token) ? 1 : 0), 0);
+  const relevanceScore = tokenScore + phraseScore + exactTitleScore + urlScore;
+  return { score: relevanceScore + (20 - authorityRank(source.authorityLevel)) / 10, relevanceScore };
+}
+
+export function rankAuthorityCatalog(query: string, catalog: OfficialAuthorityDocument[] = OFFICIAL_AUTHORITY_CATALOG): OfficialAuthorityDocument[] {
+  const normalizedQuery = normalize(query);
   const focusedCatalog =
-    /mileage|vehicle|car|travel|substantiat/.test(normalizedQuery)
+    /ob{2,6}a|ob3|one big beautiful|beautiful bill|public law 119-21|hr 1|h r 1|tax law change|new tax law/.test(normalizedQuery)
+      ? catalog.filter((source) => /ob{2,6}a|ob3|one big beautiful|public law 119-21|hr 1|h r 1|tcja|2025 tax changes|irs implementation/.test(normalize(`${source.title} ${source.topicTags.join(" ")}`)))
+      : /mileage|vehicle|car|travel|substantiat/.test(normalizedQuery)
       ? catalog.filter((source) => /mileage|vehicle|\bcar\b|travel|substantiation|business purpose/.test(normalize(`${source.title} ${source.topicTags.join(" ")}`)))
       : /s corp|s corporation|2553|small business corporation|election/.test(normalizedQuery)
         ? catalog.filter((source) => /s corp|s corporation|2553|small business corporation|election/.test(normalize(`${source.title} ${source.topicTags.join(" ")}`)))
@@ -1137,14 +1289,204 @@ export function rankAuthorityCatalog(query: string, catalog: OfficialAuthorityDo
   const pool = focusedCatalog.length > 0 ? focusedCatalog : catalog;
   return pool
     .map((source) => {
-      const haystack = normalize(`${source.title} ${source.topicTags.join(" ")}`);
-      const tokenScore = tokens.reduce((score, token) => score + (haystack.includes(token) ? 2 : 0), 0);
-      const phraseScore = source.topicTags.reduce((score, tag) => score + (normalizedQuery.includes(normalize(tag)) ? 8 : 0), 0);
-      return { source, score: tokenScore + phraseScore + (20 - authorityRank(source.authorityLevel)) / 10 };
+      const scored = authoritySearchScore(query, source);
+      return { source, score: scored.score, relevanceScore: scored.relevanceScore };
     })
-    .filter((item) => item.score > 1.5)
-    .sort((a, b) => b.score - a.score || authorityRank(a.source.authorityLevel) - authorityRank(b.source.authorityLevel))
+    .filter((item) => item.relevanceScore > 0.5)
+    .sort((a, b) => {
+      const scoreDiff = b.score - a.score;
+      if (Math.abs(scoreDiff) > 2) return scoreDiff;
+      return authorityRank(a.source.authorityLevel) - authorityRank(b.source.authorityLevel) || scoreDiff;
+    })
     .map((item) => item.source);
+}
+
+type IrsSitemapEntry = {
+  url: string;
+  lastmod: string | null;
+};
+
+let irsSitemapCache: { loadedAt: number; entries: IrsSitemapEntry[] } | null = null;
+
+function sourceId(prefix: string, value: string): string {
+  return `${prefix}-${normalize(value).replace(/\s+/g, "-").slice(0, 90)}`;
+}
+
+function titleFromUrl(url: string): string {
+  const parsed = new URL(url);
+  const slug = parsed.pathname
+    .split("/")
+    .filter(Boolean)
+    .at(-1)
+    ?.replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+  return slug || parsed.hostname;
+}
+
+function authorityFromIrsUrl(url: string, title: string): AuthorityLevel {
+  const normalizedUrl = normalize(url);
+  const normalizedTitle = normalize(title);
+  if (normalizedUrl.includes("/irb/") || normalizedUrl.includes("/pub/irs-irbs/")) return "INTERNAL_REVENUE_BULLETIN";
+  if (normalizedUrl.includes("revenue-procedure") || normalizedTitle.includes("revenue procedure")) return "INTERNAL_REVENUE_BULLETIN";
+  if (normalizedUrl.includes("revenue-ruling") || normalizedTitle.includes("revenue ruling")) return "INTERNAL_REVENUE_BULLETIN";
+  if (normalizedUrl.includes("/forms-pubs/about-form") || normalizedUrl.includes("/forms-pubs/about-schedule")) return "IRS_FORM_INSTRUCTION";
+  if (normalizedUrl.includes("/forms-pubs/about-publication") || normalizedUrl.includes("/pub/irs-pdf/p")) return "IRS_PUBLICATION";
+  if (normalizedUrl.includes("/newsroom/")) return "IRS_FAQ";
+  if (normalizedUrl.includes("/tax-professionals/circular-230")) return "TREASURY_REGULATION";
+  if (normalizedUrl.includes("/instructions/") || normalizedTitle.includes("instructions")) return "IRS_FORM_INSTRUCTION";
+  return "IRS_FAQ";
+}
+
+function topicTagsForDiscovery(_query: string, title: string, url: string): string[] {
+  const raw = [...queryTokens(title), ...queryTokens(new URL(url).pathname.replaceAll("/", " "))];
+  return Array.from(new Set(raw)).slice(0, 16);
+}
+
+function isUsefulIrsUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== "www.irs.gov") return false;
+    const path = parsed.pathname.toLowerCase();
+    if (path === "/" || path.includes("/404") || path.includes("/search") || path.includes("/help/let-us-help-you")) return false;
+    if (path.includes("/es/") || path.includes("/zh-") || path.includes("/ko/") || path.includes("/ru/") || path.includes("/vi/") || path.includes("/ht/")) return false;
+    return (
+      path.includes("/forms-pubs/") ||
+      path.includes("/newsroom/") ||
+      path.includes("/irb/") ||
+      path.includes("/tax-professionals/") ||
+      path.includes("/businesses/") ||
+      path.includes("/individuals/") ||
+      path.includes("/filing/") ||
+      path.includes("/credits-deductions/") ||
+      path.includes("/retirement-plans/") ||
+      path.includes("/pub/irs-pdf/") ||
+      path.includes("/pub/irs-irbs/")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function dedupeAuthoritySources(sources: OfficialAuthorityDocument[]): OfficialAuthorityDocument[] {
+  const seen = new Set<string>();
+  const deduped: OfficialAuthorityDocument[] = [];
+  for (const source of sources) {
+    const key = source.sourceUrl.replace(/#.*$/, "").replace(/\?.*$/, "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(source);
+  }
+  return deduped;
+}
+
+async function fetchText(url: string, timeoutMs = 6_000): Promise<string> {
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: { "user-agent": "DocketTaxIntelligence/0.1 (+local foundation build)" },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.text();
+}
+
+async function loadIrsSitemapEntries(): Promise<IrsSitemapEntry[]> {
+  const now = Date.now();
+  if (irsSitemapCache && now - irsSitemapCache.loadedAt < 1000 * 60 * 30) return irsSitemapCache.entries;
+  try {
+    const indexXml = await fetchText("https://www.irs.gov/sitemap.xml", 6_000);
+    const sitemapUrls = [...indexXml.matchAll(/<loc>(.*?)<\/loc>/g)].flatMap((match) => (match[1] ? [match[1]] : [])).slice(0, 16);
+    const pageXml = await Promise.allSettled(sitemapUrls.map((url) => fetchText(url, 8_000)));
+    const entries = pageXml.flatMap((result) => {
+      if (result.status !== "fulfilled") return [];
+      const urlBlocks = [...result.value.matchAll(/<url>([\s\S]*?)<\/url>/g)].flatMap((match) => (match[1] ? [match[1]] : []));
+      return urlBlocks.flatMap((block) => {
+        const url = block.match(/<loc>(.*?)<\/loc>/)?.[1];
+        if (!url || !isUsefulIrsUrl(url)) return [];
+        return [{ url, lastmod: block.match(/<lastmod>(.*?)<\/lastmod>/)?.[1] ?? null }];
+      });
+    });
+    irsSitemapCache = { loadedAt: now, entries };
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+async function discoverIrsSourcesFromSitemap(query: string): Promise<OfficialAuthorityDocument[]> {
+  const entries = await loadIrsSitemapEntries();
+  const ranked = entries
+    .map((entry) => {
+      const title = titleFromUrl(entry.url);
+      const candidate: OfficialAuthorityDocument = {
+        id: sourceId("irs-discovered", entry.url),
+        title,
+        authorityLevel: authorityFromIrsUrl(entry.url, title),
+        sourceUrl: entry.url,
+        jurisdiction: "US",
+        publisher: "IRS",
+        topicTags: topicTagsForDiscovery(query, title, entry.url),
+        sourceDate: entry.lastmod,
+        discoveredBy: "irs-sitemap",
+      };
+      const haystack = normalize(`${title} ${entry.url}`);
+      const score = queryTokens(query).reduce((total, token) => total + (haystack.includes(token) ? 1 : 0), 0);
+      return { candidate, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || authorityRank(a.candidate.authorityLevel) - authorityRank(b.candidate.authorityLevel))
+    .slice(0, 8)
+    .map((item) => item.candidate);
+
+  return ranked;
+}
+
+function federalRegisterApiUrl(query: string): string {
+  const params = new URLSearchParams({
+    "conditions[term]": query,
+    "conditions[agencies][]": "internal-revenue-service",
+    per_page: "6",
+    order: "newest",
+  });
+  return `https://www.federalregister.gov/api/v1/documents.json?${params.toString()}`;
+}
+
+async function discoverFederalRegisterSources(query: string): Promise<OfficialAuthorityDocument[]> {
+  try {
+    const response = await fetch(federalRegisterApiUrl(query), {
+      cache: "no-store",
+      headers: { "user-agent": "DocketTaxIntelligence/0.1 (+local foundation build)" },
+      signal: AbortSignal.timeout(6_000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = (await response.json()) as {
+      results?: Array<{ title?: string; html_url?: string; publication_date?: string; type?: string }>;
+    };
+    return (payload.results ?? [])
+      .flatMap((result) => {
+        if (!result.title || !result.html_url) return [];
+        return [
+          {
+            id: sourceId("federal-register-discovered", result.html_url),
+            title: result.type ? `${result.title} (${result.type})` : result.title,
+            authorityLevel: "FEDERAL_REGISTER" as const,
+            sourceUrl: result.html_url,
+            jurisdiction: "US" as const,
+            publisher: "Federal Register" as const,
+            topicTags: topicTagsForDiscovery(query, result.title, result.html_url),
+            sourceDate: result.publication_date ?? null,
+            discoveredBy: "federal-register-api" as const,
+          },
+        ];
+      })
+      .slice(0, 6);
+  } catch {
+    return [];
+  }
+}
+
+async function discoverOfficialAuthorityCandidates(query: string): Promise<OfficialAuthorityDocument[]> {
+  const [irsSources, federalRegisterSources] = await Promise.all([discoverIrsSourcesFromSitemap(query), discoverFederalRegisterSources(query)]);
+  return dedupeAuthoritySources([...OFFICIAL_AUTHORITY_CATALOG, ...irsSources, ...federalRegisterSources]);
 }
 
 function htmlToText(html: string): string {
@@ -1166,10 +1508,11 @@ function pageLastUpdated(text: string): string | null {
 }
 
 function splitSentences(text: string): string[] {
+  const boilerplatePattern = /skip to main content|official website|here's how you know|a gov website belongs|menu|search|page last reviewed|share sensitive information only/i;
   return text
     .split(/(?<=[.!?])\s+/)
     .map((sentence) => sentence.trim())
-    .filter((sentence) => sentence.length > 60 && sentence.length < 420);
+    .filter((sentence) => sentence.length > 60 && sentence.length < 420 && !boilerplatePattern.test(sentence));
 }
 
 function sourceSnippets(text: string, query: string, source: OfficialAuthorityDocument): string[] {
@@ -1202,7 +1545,7 @@ async function fetchOfficialSource(source: OfficialAuthorityDocument, query: str
     const text = htmlToText(await response.text());
     return {
       ...source,
-      score: rankAuthorityCatalog(query, [source]).length > 0 ? 1 : 0,
+      score: authoritySearchScore(query, source).score,
       retrievedAt,
       pageLastUpdated: pageLastUpdated(text),
       snippets: sourceSnippets(text, query, source),
@@ -1228,7 +1571,14 @@ function answerFromAuthorities(query: string, sources: RetrievedAuthority[]): Au
   const sourceList = liveSources.map((source) => `${source.title} (${source.authorityLevel.replaceAll("_", " ")})`).join("; ");
   const normalizedQuery = normalize(query);
   const topicChecklist =
-    /s corp|s corporation|2553|election/.test(normalizedQuery)
+    /ob{2,6}a|ob3|one big beautiful|beautiful bill|public law 119-21|hr 1|h r 1|new tax law|tax law change/.test(normalizedQuery)
+      ? [
+          "Segment clients by affected provision, tax year, filing status, age, wage/tip/overtime profile, Schedule C/pass-through exposure, itemized deduction profile, and state conformity.",
+          "Use the public law text for statutory changes, then IRS OBBBA implementation pages/notices for filing-season procedure and transition relief.",
+          "Treat 2025 form/reporting implementation separately from 2025 tax-law eligibility; IRS transition relief can change workflow even when the statute is effective.",
+          "Create reviewer tasks for state conformity and provision-specific effective dates before sending client-facing planning advice.",
+        ]
+      : /s corp|s corporation|2553|election/.test(normalizedQuery)
       ? ["Confirm entity eligibility and shareholder consent.", "Check Form 2553 timing or late-election relief path.", "Document effective date, tax year, and reviewer approval."]
       : /mileage|vehicle|car|travel/.test(normalizedQuery)
         ? ["Establish date, destination, mileage, and business purpose.", "Separate commuting/personal use from business use.", "Attach contemporaneous log support before claiming."]
@@ -1270,13 +1620,18 @@ function answerFromAuthorities(query: string, sources: RetrievedAuthority[]): Au
 
 export async function retrieveOfficialAuthority(query: string): Promise<AuthorityResearchResult> {
   const retrievedAt = new Date().toISOString();
-  const ranked = rankAuthorityCatalog(query).slice(0, 4);
-  const candidates = ranked.length > 0 ? ranked : OFFICIAL_AUTHORITY_CATALOG.slice(0, 3);
+  const candidateCatalog = await discoverOfficialAuthorityCandidates(query);
+  const ranked = rankAuthorityCatalog(query, candidateCatalog).slice(0, 6);
+  const candidates = ranked.length > 0 ? ranked : [];
   const sources = await Promise.all(candidates.map((source) => fetchOfficialSource(source, query, retrievedAt)));
   const sortedSources = sources.sort(
-    (a, b) =>
-      (b.fetchStatus === "LIVE" ? 1 : 0) - (a.fetchStatus === "LIVE" ? 1 : 0) ||
-      authorityRank(a.authorityLevel) - authorityRank(b.authorityLevel),
+    (a, b) => {
+      const liveDiff = (b.fetchStatus === "LIVE" ? 1 : 0) - (a.fetchStatus === "LIVE" ? 1 : 0);
+      if (liveDiff !== 0) return liveDiff;
+      const scoreDiff = b.score - a.score;
+      if (Math.abs(scoreDiff) > 2) return scoreDiff;
+      return authorityRank(a.authorityLevel) - authorityRank(b.authorityLevel) || scoreDiff;
+    },
   );
 
   return {

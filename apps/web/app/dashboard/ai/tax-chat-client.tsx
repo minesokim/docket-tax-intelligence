@@ -139,6 +139,7 @@ function sourceBuckets(response: TaxChatResponse) {
     new Set([
       ...answer.sourceIds,
       ...answer.citationIds,
+      ...(answer.retrievedAuthority?.sources.map((source) => source.id) ?? []),
       ...(answer.professionalAnalyses?.flatMap((analysis) => [...analysis.sourceIds, ...analysis.citationIds]) ?? []),
     ]),
   );
@@ -151,7 +152,7 @@ function sourceBuckets(response: TaxChatResponse) {
 
   for (const id of ids) {
     const type = sourceIndex[id]?.type.toLowerCase() ?? "";
-    if (type.includes("authority") || id.startsWith("cite-")) bucketed.authority.push(id);
+    if (type.includes("authority") || type.includes("irs") || type.includes("congress") || type.includes("govinfo") || type.includes("federal") || type.includes("ecfr") || id.startsWith("cite-")) bucketed.authority.push(id);
     else if (type.includes("conversation") || type.includes("client claim")) bucketed.conversation.push(id);
     else if (type.includes("document") || type.includes("tax fact") || type.includes("client question") || type.includes("workpaper")) bucketed.clientFile.push(id);
     else bucketed.knowledgeGraph.push(id);
@@ -164,6 +165,7 @@ function SourceRail({ response }: { response: TaxChatResponse }) {
   const buckets = sourceBuckets(response);
   const { sourceIndex } = response;
   const packetById = new Map((response.answer.artifacts?.sourcePacket ?? []).map((packet) => [packet.id, packet]));
+  const retrievedAuthorityById = new Map((response.answer.retrievedAuthority?.sources ?? []).map((source) => [source.id, source]));
   const renderBucket = (title: string, ids: string[]) => (
     <div className="memo-source-bucket" key={title}>
       <div>{title}</div>
@@ -171,9 +173,10 @@ function SourceRail({ response }: { response: TaxChatResponse }) {
         ids.slice(0, 12).map((id) => {
           const source = sourceIndex[id];
           const packet = packetById.get(id);
+          const retrievedAuthority = retrievedAuthorityById.get(id);
           return (
-            <a href={`#source-${id}`} id={`source-${id}`} key={`${title}-${id}`} title={source?.detail ?? packet?.excerpt ?? id}>
-              {source?.label ?? packet?.label ?? id}
+            <a href={retrievedAuthority?.sourceUrl ?? `#source-${id}`} id={`source-${id}`} key={`${title}-${id}`} title={source?.detail ?? packet?.excerpt ?? retrievedAuthority?.snippets[0] ?? id}>
+              {source?.label ?? packet?.label ?? retrievedAuthority?.title ?? id}
             </a>
           );
         })
@@ -250,6 +253,7 @@ function ReasoningTrace({ analysis }: { analysis: MemoIssue }) {
 
 function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate: boolean }) {
   const { answer, sourceIndex } = response;
+  const isResearch = answer.mode === "general-research";
   const artifactMemo = answer.artifacts?.memo;
   const packetById = new Map((answer.artifacts?.sourcePacket ?? []).map((packet) => [packet.id, packet]));
   const issuePacketByIssueId = new Map((answer.artifacts?.issuePackets ?? []).map((packet) => [packet.issueId, packet]));
@@ -265,16 +269,21 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
   const clientQueue = answer.actionQueues?.clientFacing ?? analyses.map((analysis) => analysis.clientCommunicationDraft);
   const preparerQueue = answer.actionQueues?.preparerFacing ?? analyses.flatMap((analysis) => analysis.preparerWorkPlan);
   const verdict = artifactMemo?.verdict ?? answer.verdict;
+  const title = artifactMemo?.headline ?? answer.headline;
+  const documentKind = isResearch ? "Research memo" : "Client memo";
+  const metadataLine = issueCount > 0
+    ? `${documentKind} · Generated just now · Reasoning: ${issueCount} issue${issueCount === 1 ? "" : "s"} analyzed · Sources linked inline`
+    : `${documentKind} · Generated just now · Authority packet: ${answer.retrievedAuthority?.sources.length ?? 0} source${(answer.retrievedAuthority?.sources.length ?? 0) === 1 ? "" : "s"} · Sources linked inline`;
 
   return (
     <article className="chat-message assistant-message memo-message">
       <div className="chat-avatar">AI</div>
       <div className="memo-workspace">
         <div className="memo-document">
-          <div className="memo-breadcrumb">Clients / {response.contextLabel ?? "Selected return"}</div>
+          <div className="memo-breadcrumb">{isResearch ? "Research / General tax authority" : `Clients / ${response.contextLabel ?? "Selected return"}`}</div>
           <header className="memo-header">
-            <h2>{artifactMemo?.headline ?? answer.headline}</h2>
-            <p>Memo · Generated just now · Reasoning: {issueCount} issues analyzed · Sources linked inline</p>
+            <h2>{title}</h2>
+            <p>{metadataLine}</p>
           </header>
 
           {verdict ? (
@@ -284,7 +293,13 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
               <span>Readiness: {verdict.readinessScore}%</span>
               <span>Extension risk: {verdict.extensionRiskScore}%</span>
             </div>
-          ) : null}
+          ) : (
+            <div className="memo-badges">
+              <span className={isResearch ? "warning" : "success"}>{isResearch ? "Research mode" : "Client-file mode"}</span>
+              <span>{answer.synthesizedBy ?? "deterministic retrieval"}</span>
+              {answer.retrievedAuthority ? <span>{answer.retrievedAuthority.sources.filter((source) => source.fetchStatus === "LIVE").length} live source(s)</span> : null}
+            </div>
+          )}
 
           <section className="memo-lede">
             {leadParagraphs.map((paragraph) => (
@@ -292,9 +307,11 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
             ))}
           </section>
 
-          <h3 className="memo-section-label">Issues, ranked by filing impact</h3>
-          {analyses.map((analysis, index) => (
-            <section className="memo-issue" key={analysis.issueId}>
+          {analyses.length > 0 ? (
+            <>
+              <h3 className="memo-section-label">Issues, ranked by filing impact</h3>
+              {analyses.map((analysis, index) => (
+                <section className="memo-issue" key={analysis.issueId}>
               <div className="memo-issue-header">
                 <div>
                   <h4>{index + 1}. {analysis.title}</h4>
@@ -329,19 +346,52 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
                 <button type="button">{analysis.issueId.includes("income") || analysis.issueId.includes("1099k") ? "Open reconciliation table" : "Open source packet"}</button>
               </div>
               <ReasoningTrace analysis={analysis} />
+                </section>
+              ))}
+            </>
+          ) : (
+            <section className="memo-research-grid">
+              <div>
+                <h3>Reasoning summary</h3>
+                <ul>{answer.reasoningSummary.map((item) => <li key={item}>{item}</li>)}</ul>
+              </div>
+              <div>
+                <h3>Next steps</h3>
+                <ul>{answer.nextSteps.map((item) => <li key={item}>{item}</li>)}</ul>
+              </div>
+              {answer.retrievedAuthority ? (
+                <div className="memo-authority-list">
+                  <h3>Retrieved authority</h3>
+                  {answer.retrievedAuthority.sources.map((source) => (
+                    <article className="memo-authority-card" key={source.id}>
+                      <div className="memo-issue-header">
+                        <div>
+                          <h4><a href={source.sourceUrl}>{source.title}</a></h4>
+                          <p>{source.publisher} · {source.authorityLevel.replaceAll("_", " ")} · retrieved {source.retrievedAt.slice(0, 10)}</p>
+                        </div>
+                        <span className={source.fetchStatus === "LIVE" ? "success" : "danger"}>{source.fetchStatus.toLowerCase()}</span>
+                      </div>
+                      {source.error ? <p className="answer-warning">{source.error}</p> : null}
+                      {source.snippets.slice(0, 2).map((snippet) => <blockquote key={snippet}>{snippet}</blockquote>)}
+                    </article>
+                  ))}
+                </div>
+              ) : null}
             </section>
-          ))}
+          )}
 
-          <section className="memo-action-queues">
-            <div>
-              <h3>Send to client</h3>
-              <ol>{clientQueue.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ol>
-            </div>
-            <div>
-              <h3>Preparer queue</h3>
-              <ol>{Array.from(new Set(preparerQueue)).slice(0, 6).map((item) => <li key={item}>{item}</li>)}</ol>
-            </div>
-          </section>
+          {analyses.length > 0 ? (
+            <section className="memo-action-queues">
+              <div>
+                <h3>Send to client</h3>
+                <ol>{clientQueue.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ol>
+              </div>
+              <div>
+                <h3>Preparer queue</h3>
+                <ol>{Array.from(new Set(preparerQueue)).slice(0, 6).map((item) => <li key={item}>{item}</li>)}</ol>
+              </div>
+            </section>
+          ) : null}
 
           <footer className="memo-footer-actions">
             <button type="button">Export memo PDF</button>
@@ -395,7 +445,7 @@ function AssistantAnswer({ response, animate }: { response: TaxChatResponse; ani
   const animatedBody = useTypewriter(answer.answer.join("\n\n"), animate);
   const bodyParagraphs = animatedBody.split("\n\n").filter(Boolean);
 
-  if (answer.mode === "client-return" && ((answer.artifacts?.issueAnalyses.length ?? 0) > 0 || answer.professionalAnalyses?.length)) {
+  if (answer.mode === "client-return" || answer.mode === "general-research") {
     return <MemoAnswer response={response} animate={animate} />;
   }
 

@@ -84,13 +84,13 @@ pre {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 204px minmax(0, 1fr);
   min-height: 100vh;
   transition: grid-template-columns 0.2s ease;
 }
 
 .app-shell-collapsed {
-  grid-template-columns: 72px minmax(0, 1fr);
+  grid-template-columns: 56px minmax(0, 1fr);
 }
 
 .sidebar {
@@ -99,7 +99,7 @@ pre {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  padding: 16px 14px;
+  padding: 14px 10px;
   border-right: 1px solid var(--line);
   background: #102018;
   color: #f4fbf6;
@@ -123,12 +123,13 @@ pre {
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
-  border-radius: 10px;
-  background: #f7c948;
-  color: #102018;
+  border: 1px solid rgba(224, 255, 232, 0.16);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #d9ff62;
   font-weight: 800;
 }
 
@@ -154,9 +155,9 @@ pre {
 .sidebar-toggle {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  min-height: 30px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 9px;
@@ -179,9 +180,9 @@ pre {
   display: flex;
   align-items: center;
   gap: 9px;
-  min-height: 36px;
-  padding: 8px 10px;
-  border-radius: 10px;
+  min-height: 34px;
+  padding: 7px 8px;
+  border-radius: 9px;
   color: #e7f0ea;
   font-size: 14px;
 }
@@ -189,8 +190,8 @@ pre {
 .side-nav-short {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 23px;
+  height: 23px;
   flex: 0 0 auto;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
@@ -246,8 +247,8 @@ pre {
 
 .app-shell-collapsed .side-nav a {
   justify-content: center;
-  width: 48px;
-  padding: 8px;
+  width: 36px;
+  padding: 6px;
 }
 
 .main-shell {
@@ -262,7 +263,7 @@ pre {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 28px;
+  padding: 12px 24px;
   border-bottom: 1px solid var(--line);
   background: rgba(246, 247, 244, 0.92);
   backdrop-filter: blur(16px);
@@ -289,7 +290,7 @@ pre {
 }
 
 main {
-  padding: 28px;
+  padding: 24px;
 }
 
 .page-header {
@@ -711,18 +712,18 @@ main {
 
 .taxgpt-shell {
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   min-height: calc(100vh - 112px);
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: #f7f8f4;
   box-shadow: 0 24px 70px rgba(20, 34, 27, 0.11);
   transition: grid-template-columns 0.2s ease;
 }
 
 .taxgpt-shell-collapsed {
-  grid-template-columns: 58px minmax(0, 1fr);
+  grid-template-columns: 48px minmax(0, 1fr);
 }
 
 .taxgpt-history {
@@ -739,8 +740,8 @@ main {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 62px;
-  padding: 14px;
+  min-height: 58px;
+  padding: 12px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
@@ -755,8 +756,8 @@ main {
 .taxgpt-rail-toggle {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   margin-left: auto;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
@@ -810,17 +811,17 @@ main {
 .taxgpt-rail-icons {
   display: grid;
   align-content: start;
-  gap: 10px;
-  padding: 14px 8px;
+  gap: 8px;
+  padding: 12px 6px;
 }
 
 .taxgpt-rail-icons button {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.05);
   color: #dbe8de;
   font-size: 12px;
@@ -893,8 +894,8 @@ main {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 76px;
-  padding: 14px 22px;
+  min-height: 72px;
+  padding: 13px 20px;
   border-bottom: 1px solid var(--line);
   background: rgba(251, 252, 250, 0.88);
   backdrop-filter: blur(12px);
@@ -911,7 +912,7 @@ main {
   align-content: start;
   gap: 18px;
   overflow: auto;
-  padding: 24px 28px 28px;
+  padding: 22px 24px 28px;
 }
 
 .chat-message {
@@ -1002,19 +1003,19 @@ main {
 
 .memo-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 260px);
   width: 100%;
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 10px;
   background: white;
   box-shadow: 0 18px 45px rgba(20, 34, 27, 0.08);
 }
 
 .memo-document {
   min-width: 0;
-  padding: 24px 28px;
+  padding: 28px 32px;
 }
 
 .memo-breadcrumb {
@@ -1026,7 +1027,7 @@ main {
 .memo-header h2 {
   margin: 0;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 25px;
+  font-size: clamp(25px, 2.3vw, 36px);
   font-weight: 500;
   line-height: 1.25;
 }
@@ -1070,11 +1071,16 @@ main {
   color: #8a6413;
 }
 
+.memo-badges .warning {
+  background: #fff7df;
+  color: #8a6413;
+}
+
 .memo-lede {
   margin-bottom: 22px;
   color: var(--ink);
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1.75;
 }
 
@@ -1284,7 +1290,7 @@ main {
   gap: 16px;
   border-left: 1px solid var(--line);
   background: #f8faf8;
-  padding: 22px 16px;
+  padding: 24px 18px;
   font-size: 12px;
 }
 
@@ -1311,6 +1317,68 @@ main {
   color: var(--ink);
   line-height: 1.45;
   text-decoration: none;
+}
+
+.memo-research-grid {
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.memo-research-grid > div,
+.memo-authority-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8faf8;
+  padding: 14px;
+}
+
+.memo-research-grid h3,
+.memo-authority-list h3 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.memo-research-grid ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+.memo-authority-list {
+  display: grid;
+  gap: 10px;
+}
+
+.memo-authority-card {
+  display: grid;
+  gap: 10px;
+  background: white;
+}
+
+.memo-authority-card h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.memo-authority-card a {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.memo-authority-card blockquote {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--blue);
+  border-radius: 0 8px 8px 0;
+  background: #eef4f6;
+  color: var(--ink);
+  line-height: 1.5;
 }
 
 .chat-bubble h3 {
