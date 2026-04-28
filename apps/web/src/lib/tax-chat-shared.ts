@@ -40,6 +40,16 @@ export type ChatAnswer = {
   limitation?: string;
 };
 
+export type ReasoningTraceStatus = "pending" | "in_progress" | "complete" | "error" | "skipped";
+
+export type ReasoningTraceStep = {
+  id: string;
+  label: string;
+  status: ReasoningTraceStatus;
+  summary?: string;
+  timestamp: string;
+};
+
 export type ProfessionalAnalysisView = {
   issueId: string;
   title: string;
@@ -73,6 +83,7 @@ export type TaxChatResponse = {
   sourceIndex: Record<string, SourceIndexEntry>;
   contextLabel: string | null;
   contextReturnId: string | null;
+  reasoningTrace?: ReasoningTraceStep[];
 };
 
 export const suggestedQuestions = [

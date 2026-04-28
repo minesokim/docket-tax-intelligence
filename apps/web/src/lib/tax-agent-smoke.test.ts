@@ -12,6 +12,13 @@ describe("tax agent smoke loop", () => {
     expect(response.retrieverResults).toHaveLength(1);
     expect(response.retrieverResults[0]?.retrieverId).toBe("client_file");
     expect(response.validation.passed).toBe(true);
+    expect(response.reasoningTrace?.map((step) => step.label)).toEqual([
+      "Reviewing compliance requirements",
+      "Reading Miguel's client file",
+      "Drafting reviewer memo",
+      "Checking citations and refusal shape",
+    ]);
+    expect(response.reasoningTrace?.every((step) => !/clientFile\.retrieve|tool call|filter expression/i.test(`${step.label} ${step.summary ?? ""}`))).toBe(true);
     expect(text).toContain("Freelance income");
     expect(text).toContain("missing brokerage 1099-B");
     expect(text).toContain("Bluepeak");
@@ -33,6 +40,11 @@ describe("tax agent smoke loop", () => {
     expect(response.preclassification.refusalType).toBe("section_7216_disclosure");
     expect(response.retrieverResults).toEqual([]);
     expect(response.validation.passed).toBe(true);
+    expect(response.reasoningTrace?.map((step) => step.label)).toEqual([
+      "Reviewing compliance requirements",
+      "Drafting refusal with safe alternatives",
+    ]);
+    expect(response.reasoningTrace?.some((step) => /client file/i.test(step.label))).toBe(false);
     expect(response.answer.headline).toContain("personal email");
     expect(text).toContain("I won't email");
     expect(text).toContain("Section 7216");
@@ -62,6 +74,7 @@ describe("tax agent smoke loop", () => {
     expect(response.answer.mode).toBe("firm-portfolio");
     expect(response.retrieverResults).toEqual([]);
     expect(response.validation.passed).toBe(true);
+    expect(response.reasoningTrace?.map((step) => step.status)).toContain("skipped");
     expect(response.answer.headline).toContain("Portfolio smoke path");
     expect(text).toContain("only the client-file retriever wired");
     expect(text).toContain("will not substitute the old generic urgency queue");

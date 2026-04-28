@@ -7,7 +7,9 @@ import {
 
 import type {
   ChatAnswer,
+  ReasoningTraceStep,
   SourceIndexEntry,
+  TaxChatResponse,
 } from "./tax-chat-shared";
 import type {
   ClientFileRetrieverRequest,
@@ -47,16 +49,45 @@ export type SmokeValidation = {
   citedSourceIds: string[];
 };
 
-export type TaxAgentSmokeResponse = {
-  answer: ChatAnswer;
-  sourceIndex: Record<string, SourceIndexEntry>;
+export type TaxAgentSmokeResponse = TaxChatResponse & {
   preclassification: SmokePreclassification;
   retrieverResults: TaxRetrieverResult[];
   validation: SmokeValidation;
 };
 
+type TraceEmitter = (step: ReasoningTraceStep) => void;
+
 function compactText(input: string): string {
   return input.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function makeTraceStep(id: string, label: string, status: ReasoningTraceStep["status"], summary?: string): ReasoningTraceStep {
+  return {
+    id,
+    label,
+    status,
+    ...(summary ? { summary } : {}),
+    timestamp: nowIso(),
+  };
+}
+
+function recordTrace(
+  trace: ReasoningTraceStep[],
+  emit: TraceEmitter | undefined,
+  id: string,
+  label: string,
+  status: ReasoningTraceStep["status"],
+  summary?: string,
+) {
+  const step = makeTraceStep(id, label, status, summary);
+  const existingIndex = trace.findIndex((item) => item.id === id);
+  if (existingIndex >= 0) trace[existingIndex] = step;
+  else trace.push(step);
+  emit?.(step);
 }
 
 export function preclassifyTaxAgentSmoke(question: string): SmokePreclassification {
@@ -423,20 +454,42 @@ export function runTaxAgentSmokeLoop(
   options: {
     data?: DocketData;
     context?: Partial<RetrieverContext>;
+    emitTrace?: TraceEmitter;
   } = {},
 ): TaxAgentSmokeResponse {
+  const reasoningTrace: ReasoningTraceStep[] = [];
+  const trace = (
+    id: string,
+    label: string,
+    status: ReasoningTraceStep["status"],
+    summary?: string,
+  ) => recordTrace(reasoningTrace, options.emitTrace, id, label, status, summary);
   const context: RetrieverContext = {
     ...DEFAULT_CONTEXT,
     ...options.context,
     originalPrompt: question,
   };
+  trace("compliance-check", "Reviewing compliance requirements", "in_progress");
   const preclassification = preclassifyTaxAgentSmoke(question);
+  trace(
+    "compliance-check",
+    "Reviewing compliance requirements",
+    "complete",
+    preclassification.refusalRequired
+      ? preclassification.reason ?? "Compliance preflight requires a refusal."
+      : "No smoke preflight refusal trigger found.",
+  );
 
   if (preclassification.refusalRequired) {
+    trace("draft-refusal", "Drafting refusal with safe alternatives", "in_progress");
     const answer = synthesizeRefusal(preclassification);
+    trace("draft-refusal", "Drafting refusal with safe alternatives", "complete", "Refusal rendered before any client-file retrieval.");
     return {
       answer,
       sourceIndex: {},
+      contextLabel: preclassification.refusalType === "section_7216_use" ? null : "Miguel Sandoval",
+      contextReturnId: preclassification.refusalType === "section_7216_use" ? null : MIGUEL_RETURN_ID,
+      reasoningTrace,
       preclassification,
       retrieverResults: [],
       validation: validateTaxAgentSmokeOutput(answer, [], preclassification),
@@ -444,16 +497,24 @@ export function runTaxAgentSmokeLoop(
   }
 
   if (isPortfolioQuestion(question)) {
+    trace("check-portfolio-coverage", "Checking portfolio coverage", "in_progress");
+    trace("check-portfolio-coverage", "Checking portfolio coverage", "skipped", "portfolio.retrieve is not wired into the smoke path yet.");
+    trace("draft-response", "Drafting response with the retrieval gap", "in_progress");
     const answer = synthesizeUnsupportedPortfolioSmoke(question);
+    trace("draft-response", "Drafting response with the retrieval gap", "complete", "Returned an honest no-result explanation instead of the legacy urgency queue.");
     return {
       answer,
       sourceIndex: {},
+      contextLabel: null,
+      contextReturnId: null,
+      reasoningTrace,
       preclassification,
       retrieverResults: [],
       validation: validateTaxAgentSmokeOutput(answer, [], preclassification),
     };
   }
 
+  trace("read-client-file", "Reading Miguel's client file", "in_progress");
   const result = retrieveClientFileSmoke(
     {
       context,
@@ -466,14 +527,35 @@ export function runTaxAgentSmokeLoop(
     },
     options.data,
   );
+  trace(
+    "read-client-file",
+    "Reading Miguel's client file",
+    result.status === "hit" ? "complete" : "error",
+    result.client && result.workflowState
+      ? `${result.evidence.length} source-packet items; ${result.workflowState.blockersCount} blocker(s); readiness ${result.workflowState.readinessScore}%; extension risk ${result.workflowState.extensionRisk}%.`
+      : result.metadata.errors[0]?.message ?? "Client file retrieval did not return usable evidence.",
+  );
   const retrieverResults: TaxRetrieverResult[] = [result];
+  trace("draft-response", "Drafting reviewer memo", "in_progress");
   const answer = synthesizeMiguelSmokeMemo(question, result);
+  trace("draft-response", "Drafting reviewer memo", "complete", "Memo drafted from returned source-packet citations.");
+  trace("validate-output", "Checking citations and refusal shape", "in_progress");
+  const validation = validateTaxAgentSmokeOutput(answer, retrieverResults, preclassification);
+  trace(
+    "validate-output",
+    "Checking citations and refusal shape",
+    validation.passed ? "complete" : "error",
+    validation.passed ? `${validation.citedSourceIds.length} cited source packet(s) validated.` : validation.errors.join(" "),
+  );
 
   return {
     answer,
     sourceIndex: buildSourceIndex(retrieverResults),
+    contextLabel: result.client?.displayName ?? "Miguel Sandoval",
+    contextReturnId: MIGUEL_RETURN_ID,
+    reasoningTrace,
     preclassification,
     retrieverResults,
-    validation: validateTaxAgentSmokeOutput(answer, retrieverResults, preclassification),
+    validation,
   };
 }

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { StatusBadge } from "../../../src/components/docket-ui";
-import { suggestedQuestions, type ChatAnswer, type ChatHistoryTurn, type SourceIndexEntry, type TaxChatResponse } from "../../../src/lib/tax-chat-shared";
+import { suggestedQuestions, type ChatAnswer, type ChatHistoryTurn, type ReasoningTraceStep, type SourceIndexEntry, type TaxChatResponse } from "../../../src/lib/tax-chat-shared";
 import type { IssueAnalysisArtifact, IssueReasoningPacket, ReconciliationTableArtifact, SourcePacketItem } from "@docket/domain";
 
 type Message = {
@@ -12,6 +12,12 @@ type Message = {
   content: string;
   response?: TaxChatResponse;
 };
+
+function upsertTraceStep(steps: ReasoningTraceStep[], next: ReasoningTraceStep): ReasoningTraceStep[] {
+  const index = steps.findIndex((step) => step.id === next.id);
+  if (index === -1) return [...steps, next];
+  return steps.map((step, stepIndex) => (stepIndex === index ? next : step));
+}
 
 function sourceLabel(id: string, sourceIndex: Record<string, SourceIndexEntry>) {
   const source = sourceIndex[id];
@@ -251,6 +257,50 @@ function ReasoningTrace({ analysis }: { analysis: MemoIssue }) {
   );
 }
 
+function statusLabel(status: ReasoningTraceStep["status"]) {
+  if (status === "in_progress") return "In progress";
+  if (status === "complete") return "Complete";
+  if (status === "skipped") return "Skipped";
+  if (status === "error") return "Needs attention";
+  return "Pending";
+}
+
+function LiveReasoningPanel({ steps, live }: { steps: ReasoningTraceStep[]; live: boolean }) {
+  if (steps.length === 0) return null;
+  const current = [...steps].reverse().find((step) => step.status === "in_progress")
+    ?? [...steps].reverse().find((step) => step.status === "error")
+    ?? steps.at(-1);
+  const completed = steps.filter((step) => step.status === "complete" || step.status === "skipped").length;
+
+  return (
+    <article className={`reasoning-panel ${live ? "reasoning-panel-live" : "reasoning-panel-settled"}`}>
+      <details open={live}>
+        <summary>
+          <span>
+            <strong>{live ? current?.label ?? "Working through the file" : "Show reasoning trace"}</strong>
+            {current?.summary ? <small>{current.summary}</small> : null}
+          </span>
+          <em>{live ? "Working" : `${completed}/${steps.length} steps`}</em>
+        </summary>
+        <ol>
+          {steps.map((step) => (
+            <li className={`reasoning-step reasoning-step-${step.status}`} key={step.id}>
+              <span className="reasoning-dot" aria-hidden="true" />
+              <div>
+                <div className="reasoning-step-title">
+                  <strong>{step.label}</strong>
+                  <small>{statusLabel(step.status)}</small>
+                </div>
+                {step.summary ? <p>{step.summary}</p> : null}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </details>
+    </article>
+  );
+}
+
 function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate: boolean }) {
   const { answer, sourceIndex } = response;
   const isResearch = answer.mode === "general-research";
@@ -305,6 +355,8 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
               {answer.retrievedAuthority ? <span>{answer.retrievedAuthority.sources.filter((source) => source.fetchStatus === "LIVE").length} live source(s)</span> : null}
             </div>
           )}
+
+          <LiveReasoningPanel steps={response.reasoningTrace ?? []} live={false} />
 
           <section className="memo-lede">
             {leadParagraphs.map((paragraph) => (
@@ -434,6 +486,44 @@ function ThinkingBubble() {
       </div>
     </article>
   );
+}
+
+async function readSmokeStream(
+  question: string,
+  onReasoning: (step: ReasoningTraceStep) => void,
+): Promise<TaxChatResponse> {
+  const res = await fetch("/api/ai/smoke", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ question }),
+  });
+  if (!res.ok || !res.body) throw new Error(`Smoke stream failed with status ${res.status}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResponse: TaxChatResponse | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
+    for (const chunk of chunks) {
+      const lines = chunk.split("\n");
+      const event = lines.find((line) => line.startsWith("event: "))?.slice("event: ".length);
+      const dataLine = lines.find((line) => line.startsWith("data: "));
+      if (!event || !dataLine) continue;
+      const payload = JSON.parse(dataLine.slice("data: ".length)) as unknown;
+      if (event === "reasoning") onReasoning(payload as ReasoningTraceStep);
+      if (event === "response") finalResponse = payload as TaxChatResponse;
+      if (event === "error") throw new Error((payload as { message?: string }).message ?? "Smoke stream failed");
+    }
+  }
+
+  if (!finalResponse) throw new Error("Smoke stream ended without a response.");
+  return finalResponse;
 }
 
 function useTypewriter(text: string, active: boolean) {
@@ -610,6 +700,7 @@ export function TaxChatClient({ initialQuestion, initialReturnId }: { initialQue
   const [input, setInput] = useState(initialQuestion);
   const [returnId, setReturnId] = useState(initialReturnId);
   const [pending, setPending] = useState(false);
+  const [pendingTrace, setPendingTrace] = useState<ReasoningTraceStep[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [lastAssistantId, setLastAssistantId] = useState<string | null>(null);
   const sentInitial = useRef(false);
@@ -634,23 +725,31 @@ export function TaxChatClient({ initialQuestion, initialReturnId }: { initialQue
   async function sendQuestion(question: string, attachedReturnId = returnId) {
     const trimmed = question.trim();
     if (!trimmed || pending) return;
+    const smokeMode = /^\/smoke\b/i.test(trimmed);
+    const questionToSend = smokeMode ? trimmed.replace(/^\/smoke\b/i, "").trim() || trimmed : trimmed;
     const history = buildHistorySnapshot(messages);
     setInput("");
     setPending(true);
-    setMessages((current) => [...current, { id: `user-${Date.now()}`, role: "user", content: trimmed }]);
+    setPendingTrace([]);
+    setMessages((current) => [...current, { id: `user-${Date.now()}`, role: "user", content: questionToSend }]);
     try {
-      const res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ question: trimmed, returnId: attachedReturnId, history }),
-      });
-      const response = (await res.json()) as TaxChatResponse;
+      const response = smokeMode
+        ? await readSmokeStream(questionToSend, (step) => setPendingTrace((steps) => upsertTraceStep(steps, step)))
+        : await (async () => {
+            const res = await fetch("/api/ai/chat", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ question: questionToSend, returnId: attachedReturnId, history }),
+            });
+            return (await res.json()) as TaxChatResponse;
+          })();
       const assistantId = `assistant-${Date.now()}`;
       setLastAssistantId(assistantId);
       setReturnId(response.contextReturnId ?? attachedReturnId);
       setMessages((current) => [...current, { id: assistantId, role: "assistant", content: response.answer.headline, response }]);
     } finally {
       setPending(false);
+      setPendingTrace([]);
     }
   }
 
@@ -746,7 +845,14 @@ export function TaxChatClient({ initialQuestion, initialReturnId }: { initialQue
               <AssistantAnswer animate={message.id === lastAssistantId} response={message.response} key={message.id} />
             ) : null,
           )}
-          {pending ? <ThinkingBubble /> : null}
+          {pending ? pendingTrace.length > 0 ? (
+            <article className="chat-message assistant-message">
+              <div className="chat-avatar">AI</div>
+              <div className="chat-bubble reasoning-bubble">
+                <LiveReasoningPanel steps={pendingTrace} live />
+              </div>
+            </article>
+          ) : <ThinkingBubble /> : null}
         </div>
 
         <div className="suggestion-panel">
