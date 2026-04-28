@@ -1,0 +1,7 @@
+Prior-year return summary
+Tax year: 2023
+Client: Miguel Sandoval
+Schedule C gross receipts: $112,000.00
+Prior-year brokerage account: true
+Prior-year Chase 1099-INT: true
+Extension filed last year: true

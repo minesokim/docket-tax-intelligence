@@ -567,7 +567,7 @@ const additionalSourceDocuments: SourceDocument[] = additionalClientProfiles.fla
     receivedAt: "2026-03-01T16:00:00.000Z",
     processedAt: document.processed ? NOW : null,
     duplicateOfDocumentId: null,
-    storageKey: `mock://documents/${profile.slug}/${document.id}`,
+    storageKey: `fixture://documents/${profile.slug}/${document.id}.txt`,
     suspiciousText: null,
     fixtureFields: [{ label: "Seeded document summary", value: document.fileName, confidence: 0.9 }],
   })),
@@ -850,7 +850,7 @@ export const docketSeedData: DocketData = {
       receivedAt: "2026-02-20T18:20:00.000Z",
       processedAt: NOW,
       duplicateOfDocumentId: null,
-      storageKey: "mock://documents/acme-w2",
+      storageKey: "fixture://documents/miguel/acme-w2.txt",
       suspiciousText: null,
       fixtureFields: [
         { label: "Employer", value: "Acme Design Systems", confidence: 0.99 },
@@ -870,7 +870,7 @@ export const docketSeedData: DocketData = {
       receivedAt: "2026-02-20T18:25:00.000Z",
       processedAt: NOW,
       duplicateOfDocumentId: null,
-      storageKey: "mock://documents/bluepeak-1099-nec",
+      storageKey: "fixture://documents/miguel/bluepeak-1099-nec.txt",
       suspiciousText: null,
       fixtureFields: [
         { label: "Payer", value: "Bluepeak Labs", confidence: 0.99 },
@@ -896,7 +896,7 @@ export const docketSeedData: DocketData = {
       receivedAt: "2026-02-21T15:00:00.000Z",
       processedAt: NOW,
       duplicateOfDocumentId: null,
-      storageKey: "mock://documents/stripe-1099-k",
+      storageKey: "fixture://documents/miguel/stripe-1099-k.txt",
       suspiciousText: null,
       fixtureFields: [
         { label: "Payment settlement entity", value: "Stripe", confidence: 0.99 },
@@ -922,7 +922,7 @@ export const docketSeedData: DocketData = {
       receivedAt: "2026-02-22T10:00:00.000Z",
       processedAt: NOW,
       duplicateOfDocumentId: null,
-      storageKey: "mock://documents/chase-1099-int",
+      storageKey: "fixture://documents/miguel/chase-1099-int.txt",
       suspiciousText: null,
       fixtureFields: [
         { label: "Payer", value: "Chase", confidence: 0.99 },
@@ -942,7 +942,7 @@ export const docketSeedData: DocketData = {
       receivedAt: "2026-03-03T09:30:00.000Z",
       processedAt: NOW,
       duplicateOfDocumentId: null,
-      storageKey: "mock://documents/q4-mileage-log",
+      storageKey: "fixture://documents/miguel/q4-mileage-log.txt",
       suspiciousText: null,
       fixtureFields: [
         { label: "Business miles", value: 1180, confidence: 0.81, factType: "BUSINESS_MILES", materiality: "MEDIUM" },
@@ -962,7 +962,7 @@ export const docketSeedData: DocketData = {
       receivedAt: "2026-03-03T09:35:00.000Z",
       processedAt: NOW,
       duplicateOfDocumentId: null,
-      storageKey: "mock://documents/business-expense-summary",
+      storageKey: "fixture://documents/miguel/business-expense-summary.txt",
       suspiciousText: null,
       fixtureFields: [
         { label: "Software subscriptions", value: 3120, confidence: 0.9, factType: "SCHEDULE_C_EXPENSE_SOFTWARE", materiality: "MEDIUM" },
@@ -982,7 +982,7 @@ export const docketSeedData: DocketData = {
       receivedAt: "2026-02-14T16:00:00.000Z",
       processedAt: NOW,
       duplicateOfDocumentId: null,
-      storageKey: "mock://documents/prior-year-summary",
+      storageKey: "fixture://documents/miguel/prior-year-summary.txt",
       suspiciousText: null,
       fixtureFields: [
         {
@@ -1009,7 +1009,7 @@ export const docketSeedData: DocketData = {
       receivedAt: "2026-02-14T16:05:00.000Z",
       processedAt: NOW,
       duplicateOfDocumentId: null,
-      storageKey: "mock://documents/engagement-letter",
+      storageKey: "fixture://documents/miguel/engagement-letter.txt",
       suspiciousText: null,
       fixtureFields: [{ label: "Scope", value: "1040 + Schedule C", confidence: 0.97 }],
     },
@@ -1026,7 +1026,7 @@ export const docketSeedData: DocketData = {
       receivedAt: "2026-02-14T16:07:00.000Z",
       processedAt: NOW,
       duplicateOfDocumentId: null,
-      storageKey: "mock://documents/7216-consent",
+      storageKey: "fixture://documents/miguel/7216-consent.txt",
       suspiciousText: null,
       fixtureFields: [{ label: "Consent version", value: "ai-tax-prep-v1", confidence: 0.94 }],
     },
@@ -1043,7 +1043,7 @@ export const docketSeedData: DocketData = {
       receivedAt: "2026-02-14T16:10:00.000Z",
       processedAt: null,
       duplicateOfDocumentId: null,
-      storageKey: "mock://documents/8879-placeholder",
+      storageKey: "fixture://documents/miguel/8879-placeholder.txt",
       suspiciousText: null,
       fixtureFields: [],
     },

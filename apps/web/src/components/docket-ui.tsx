@@ -189,8 +189,9 @@ export function SourceDocumentCard({ document }: { document: SourceDocument }) {
       <p>
         Tax year {document.taxYear ?? "unknown"} · {document.processedAt ? "processed" : "pending"}
       </p>
+      <small>{document.storageKey.startsWith("fixture://") ? "Text-backed seed artifact" : document.storageKey}</small>
       <div className="pill-row">
-        {document.fixtureFields.slice(0, 3).map((field) => (
+        {(document.fixtureFields.length > 0 ? document.fixtureFields.slice(0, 3) : [{ label: "Source", value: "Awaiting extraction" }]).map((field) => (
           <span className="mini-pill" key={field.label}>
             {field.label}: {String(field.value)}
           </span>

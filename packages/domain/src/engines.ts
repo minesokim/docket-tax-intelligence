@@ -18,6 +18,7 @@ import {
   TaxFactSchema,
   type WorkflowResult,
 } from "./types";
+import { extractFieldsFromDocumentText, getSeedDocumentText } from "./document-artifacts";
 import { IDS, NOW, cloneDocketData } from "./seed";
 
 type AIProviderName = AIReasoningRun["provider"];
@@ -299,7 +300,18 @@ export function runDocumentExtraction(inputData: DocketData, returnId: string): 
   if (consentBlock) return consentBlock;
 
   for (const document of data.sourceDocuments.filter((item) => item.taxReturnId === returnId)) {
-    if (document.suspiciousText && detectPromptInjectionText(document.suspiciousText)) {
+    const documentText = getSeedDocumentText(document);
+    const textBackedExtraction = documentText ? extractFieldsFromDocumentText(document, documentText) : null;
+    const extractedFixtures = textBackedExtraction?.fields ?? document.fixtureFields;
+    const provider = textBackedExtraction ? "mock_ocr" : "fixture";
+    if (textBackedExtraction) {
+      document.documentClass = textBackedExtraction.documentClass;
+      document.taxYear = textBackedExtraction.taxYear;
+      document.processedAt = NOW;
+    }
+
+    const untrustedDocumentText = [document.suspiciousText, documentText].filter(Boolean).join("\n");
+    if (untrustedDocumentText && detectPromptInjectionText(untrustedDocumentText)) {
       if (!data.documentFlags.some((flag) => flag.sourceDocumentId === document.id && flag.flagType === "PROMPT_INJECTION")) {
         data.documentFlags.push({
           id: `flag-${document.id}-prompt-injection`,
@@ -315,24 +327,29 @@ export function runDocumentExtraction(inputData: DocketData, returnId: string): 
     }
 
     const extractionId = `extract-${document.id}`;
-    if (!data.documentExtractions.some((extraction) => extraction.id === extractionId)) {
-      const confidence =
-        document.fixtureFields.length === 0
-          ? 0
-          : Number((document.fixtureFields.reduce((sum, field) => sum + field.confidence, 0) / document.fixtureFields.length).toFixed(2));
+    const confidence =
+      extractedFixtures.length === 0
+        ? 0
+        : Number((extractedFixtures.reduce((sum, field) => sum + field.confidence, 0) / extractedFixtures.length).toFixed(2));
+    const extraction = data.documentExtractions.find((item) => item.id === extractionId);
+    if (extraction) {
+      extraction.provider = provider;
+      extraction.status = extractedFixtures.length === 0 ? "PENDING" : "COMPLETE";
+      extraction.confidence = confidence;
+    } else {
       data.documentExtractions.push({
         id: extractionId,
         sourceDocumentId: document.id,
-        provider: "fixture",
-        status: document.fixtureFields.length === 0 ? "PENDING" : "COMPLETE",
+        provider,
+        status: extractedFixtures.length === 0 ? "PENDING" : "COMPLETE",
         confidence,
         createdAt: NOW,
       });
     }
 
-    for (const fixture of document.fixtureFields) {
+    for (const fixture of extractedFixtures) {
       const fieldId = `field-${document.id}-${slug(fixture.label)}`;
-      if (!data.extractedFields.some((field) => field.id === fieldId)) {
+      if (!data.extractedFields.some((field) => field.id === fieldId || (field.sourceDocumentId === document.id && field.label === fixture.label))) {
         const field: ExtractedField = {
           id: fieldId,
           extractionId,
@@ -367,7 +384,13 @@ export function runDocumentExtraction(inputData: DocketData, returnId: string): 
       }
 
       const factId = `fact-${document.id}-${slug(fixture.factType)}`;
-      if (!data.taxFacts.some((fact) => fact.id === factId || (fact.factType === fixture.factType && fact.evidenceRefs.some((ref) => ref.id === evidence.id)))) {
+      if (
+        !data.taxFacts.some(
+          (fact) =>
+            fact.id === factId ||
+            (fact.factType === fixture.factType && fact.evidenceRefs.some((ref) => ref.id === evidence.id || ref.sourceDocumentId === document.id)),
+        )
+      ) {
         const materiality = fixture.materiality ?? "MEDIUM";
         const confidence = computeTaxFactConfidence({
           sourceType: document.sourceType,
@@ -406,7 +429,7 @@ export function runDocumentExtraction(inputData: DocketData, returnId: string): 
     }
   }
 
-  events.push(audit(data, "AI_EXTRACTION_RUN", "Ran document extraction workflow.", { returnId, provider: "fixture" }, "AI"));
+  events.push(audit(data, "AI_EXTRACTION_RUN", "Ran document extraction workflow.", { returnId, provider: "mock_ocr", textBackedDocuments: data.sourceDocuments.filter((item) => item.taxReturnId === returnId && getSeedDocumentText(item)).length }, "AI"));
 
   markExportPacketStale(data, returnId);
   return { data, auditEvents: events, blocked: false, blockers: [] };

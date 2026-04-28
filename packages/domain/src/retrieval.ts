@@ -10,6 +10,7 @@ import {
   type SourcePacketItem,
 } from "./artifacts";
 import { evaluateReviewGate, scoreExtensionRisk, scoreReadiness } from "./engines";
+import { getSeedDocumentText } from "./document-artifacts";
 import { getReturnWorkbench } from "./selectors";
 import { readDocketData } from "./store";
 import type { DocketData, TaxAuthoritySource, TaxCitation } from "./types";
@@ -151,12 +152,15 @@ export function buildReturnSourcePacket(returnId: string, data: DocketData = rea
   }
 
   for (const document of data.sourceDocuments.filter((item) => item.taxReturnId === returnId)) {
+    const documentText = getSeedDocumentText(document);
     packets.push(
       sourcePacketItem({
         id: document.id,
         sourceType: "document",
         label: document.fileName,
-        excerpt: `${document.documentClass.replaceAll("_", " ")} received ${document.receivedAt.slice(0, 10)}; ${document.processedAt ? "processed" : "not processed"}. ${document.fixtureFields.map((field) => `${field.label}: ${String(field.value)}`).join("; ") || "No extracted fields yet."}`,
+        excerpt: documentText
+          ? documentText.split(/\n+/).slice(0, 12).join(" ")
+          : `${document.documentClass.replaceAll("_", " ")} received ${document.receivedAt.slice(0, 10)}; ${document.processedAt ? "processed" : "not processed"}. ${document.fixtureFields.map((field) => `${field.label}: ${String(field.value)}`).join("; ") || "No extracted fields yet."}`,
         sourceId: document.id,
         sourceUrl: document.storageKey.startsWith("http") ? document.storageKey : null,
         sourceDate: document.receivedAt,

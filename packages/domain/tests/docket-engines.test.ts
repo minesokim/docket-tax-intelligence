@@ -213,6 +213,28 @@ describe("Docket tax intelligence engines", () => {
     expect(completed.data.auditEvents.some((event) => event.summary.includes("ready for signature"))).toBe(true);
   });
 
+  it("extracts Miguel facts from text-backed seeded document artifacts before fixture fallback", () => {
+    const data = cloneDocketData();
+    data.documentExtractions = [];
+    data.extractedFields = [];
+    data.taxFacts = data.taxFacts.filter((fact) => !fact.id.startsWith("fact-doc-"));
+
+    const extracted = runDocumentExtraction(data, IDS.taxReturn);
+    const acmeExtraction = extracted.data.documentExtractions.find((item) => item.sourceDocumentId === "doc-acme-w2");
+    const w2Field = extracted.data.extractedFields.find((field) => field.sourceDocumentId === "doc-acme-w2" && field.label === "Box 1 wages");
+    const mileagePurpose = extracted.data.extractedFields.find((field) => field.sourceDocumentId === "doc-q4-mileage-log" && field.label === "Business purpose present");
+
+    expect(acmeExtraction).toEqual(expect.objectContaining({ provider: "mock_ocr", status: "COMPLETE" }));
+    expect(w2Field).toEqual(expect.objectContaining({ value: 142350, normalizedFactType: "W2_WAGES" }));
+    expect(mileagePurpose).toEqual(expect.objectContaining({ value: false, normalizedFactType: "MILEAGE_BUSINESS_PURPOSE_SUPPORT" }));
+    expect(extracted.auditEvents).toContainEqual(
+      expect.objectContaining({
+        eventType: "AI_EXTRACTION_RUN",
+        metadata: expect.objectContaining({ provider: "mock_ocr" }),
+      }),
+    );
+  });
+
   it("blocks workflows without required consent and checks permissions", () => {
     const data = cloneDocketData();
     expect(hasActiveConsent(data, IDS.client, "AI_ASSISTED_TAX_PREP", IDS.taxReturn)).toBe(true);

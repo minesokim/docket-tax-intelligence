@@ -1,0 +1,7 @@
+Mileage log
+Tax year: 2024
+Owner: Miguel Sandoval
+Coverage period: Q4 only
+Business miles: 1,180
+Business purpose present: false
+Notes: destinations are listed for several trips, but business purpose is missing on many entries.

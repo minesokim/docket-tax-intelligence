@@ -1,0 +1,5 @@
+Engagement letter
+Tax year: 2024
+Client: Miguel Sandoval
+Scope: 1040 + Schedule C
+Out-of-scope: direct e-file submission, full capital gains engine, full state return automation, crypto tax-lot accounting.

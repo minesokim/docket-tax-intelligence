@@ -1,0 +1,7 @@
+Consent to use tax return information
+Tax year: 2024
+Client: Miguel Sandoval
+Consent version: ai-tax-prep-v1
+AI-assisted tax prep: granted
+Meeting transcript analysis: granted
+Portal message analysis: granted

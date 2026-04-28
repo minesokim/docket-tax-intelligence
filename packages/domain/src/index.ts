@@ -1,5 +1,6 @@
 export * from "./types";
 export * from "./artifacts";
+export * from "./document-artifacts";
 export * from "./seed";
 export * from "./engines";
 export * from "./retrieval";

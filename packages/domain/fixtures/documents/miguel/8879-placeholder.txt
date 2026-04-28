@@ -1,0 +1,5 @@
+Form 8879 signature authorization placeholder
+Tax year: 2024
+Client: Miguel Sandoval
+Status: not signed
+Note: E-file remains disabled in the foundation release.
