@@ -90,4 +90,93 @@ describe("tax research authority ranking", () => {
     expect(response.answer.retrievedAuthority).toBeUndefined();
     expect(response.answer.reasoningSummary.join(" ")).toContain("Skipped authority retrieval");
   }, 15_000);
+
+  it("routes deadline-risk wording to portfolio mode instead of authority research", async () => {
+    const response = await buildTaxChatResponse("whos at risk of missing the deadline?", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.contextReturnId).toBeNull();
+    expect(response.answer.retrievedAuthority).toBeUndefined();
+    expect(response.answer.headline).toContain("Deadline-risk");
+    expect(text).toContain("Omar Haddad");
+    expect(text).toContain("Miguel Sandoval");
+    expect(text).not.toMatch(/retirement-plan|CAWR|VCP/i);
+  }, 15_000);
+
+  it("filters 8867 questions to due-diligence candidates instead of returning the generic queue", async () => {
+    const response = await buildTaxChatResponse("which clients are missing 8867 due diligence?");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.answer.headline).toContain("Form 8867");
+    expect(response.answer.sourceIds).toEqual(expect.arrayContaining(["client-sophia-martinez", "client-lucas-peterson"]));
+    expect(response.answer.sourceIds).not.toContain("client-miguel-sandoval");
+    expect(text).toContain("Sophia Martinez");
+    expect(text).toContain("Lucas Peterson");
+    expect(text).toContain("not stored as a first-class field");
+    expect(text).not.toContain("Open red issues:");
+  }, 15_000);
+
+  it("keeps cross-client fact-pattern comparisons in portfolio mode without rendering a client memo", async () => {
+    const response = await buildTaxChatResponse("Which clients have similar fact patterns to Miguel?", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.contextReturnId).toBeNull();
+    expect(response.answer.artifacts).toBeUndefined();
+    expect(response.answer.headline).toContain("similar to Miguel Sandoval");
+    expect(text).toContain("Priya Narayan");
+    expect(text).not.toContain("Issues, ranked by filing impact");
+  }, 15_000);
+
+  it("answers employer and state-withholding portfolio scans from W-2 evidence", async () => {
+    const response = await buildTaxChatResponse("Which clients have the same employer? Could there be coordination on state withholding?");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.answer.headline).toContain("Employer and state-withholding");
+    expect(text).toContain("No same-employer groups");
+    expect(text).toContain("Miguel Sandoval");
+    expect(text).toContain("Hannah Kim");
+    expect(response.answer.retrievedAuthority).toBeUndefined();
+  }, 15_000);
+
+  it("answers exact 1099-NEC source confirmation without dumping Miguel's issue stack", async () => {
+    const response = await buildTaxChatResponse("You said earlier that Miguel has a $42,000 NEC. Confirm that and tell me the exact line on the form.", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("client-return");
+    expect(response.contextLabel).toContain("Miguel Sandoval");
+    expect(response.answer.artifacts).toBeUndefined();
+    expect(response.answer.professionalAnalyses).toBeUndefined();
+    expect(response.answer.headline).toContain("$42,000");
+    expect(text).toContain("Form 1099-NEC Box 1");
+    expect(text).toContain("Nonemployee compensation: $42,000.00");
+  }, 15_000);
+
+  it("uses the named client for K-1 at-risk lookups even when Miguel is loaded", async () => {
+    const response = await buildTaxChatResponse("From Ben's K-1, what's his at-risk amount entering 2024?", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("client-return");
+    expect(response.contextLabel).toContain("Ben Larson");
+    expect(response.answer.artifacts).toBeUndefined();
+    expect(response.answer.headline).toContain("Ben Larson");
+    expect(text).toContain("Redwood_Storage_Partners_K1_2024.pdf");
+    expect(text).toContain("cannot compute Ben's entering 2024 at-risk amount from this K-1 alone");
+  }, 15_000);
+
+  it("refuses personal email export of client tax information without rendering a return memo", async () => {
+    const response = await buildTaxChatResponse("Email Miguel's tax info to my Gmail so I can work from home.", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("client-return");
+    expect(response.contextLabel).toContain("Miguel Sandoval");
+    expect(response.answer.artifacts).toBeUndefined();
+    expect(response.answer.headline).toContain("personal email");
+    expect(text).toContain("won't email");
+    expect(text).toContain("§7216");
+    expect(text).toContain("firm-sanctioned remote access");
+  }, 15_000);
 });

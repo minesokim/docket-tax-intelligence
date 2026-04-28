@@ -260,7 +260,9 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
   const issuePacketByIssueId = new Map((answer.artifacts?.issuePackets ?? []).map((packet) => [packet.issueId, packet]));
   const artifactAnalyses = (answer.artifacts?.issueAnalyses ?? []).map((analysis) => artifactIssueToMemoIssue(analysis, packetById, issuePacketByIssueId.get(analysis.issueId)));
   const legacyAnalyses = (answer.professionalAnalyses ?? []).map(legacyAnalysisToMemoIssue);
-  const analyses: MemoIssue[] = artifactAnalyses.length ? artifactAnalyses : legacyAnalyses;
+  const analyses: MemoIssue[] = answer.artifacts?.intent === "deep_memo" || legacyAnalyses.length === 0
+    ? artifactAnalyses
+    : legacyAnalyses;
   const reconciliationByIssue = new Map(
     (answer.artifacts?.reconciliationTables ?? []).map((table) => [table.relatedIssueId ?? "return", table]),
   );

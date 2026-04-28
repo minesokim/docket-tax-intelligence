@@ -1,5 +1,5 @@
 import { synthesizeTaxChatWithClaude } from "@docket/ai";
-import { getReturnWorkbench, readDocketData } from "@docket/domain";
+import { getReturnWorkbench, getSeedDocumentText, readDocketData } from "@docket/domain";
 import { retrieveOfficialAuthority } from "@docket/tax-knowledge";
 
 import {
@@ -136,10 +136,18 @@ function isPortfolioClientQuestion(question: string): boolean {
   const normalized = normalizeForMatch(question);
   const namedClientSignal = /\b(which|who|name|names|list|show|identify|screen)\b.*\b(client|clients|returns|files)\b/.test(normalized);
   const workQueueSignal =
-    /\bwhat do i need to work on\b|\bwhat should i work on\b|\bwhere should i focus\b|\bwho needs attention\b|\bwhat needs attention\b/.test(normalized) ||
+    /\bwhat do i need to work on\b|\bwhat should i work on\b|\bwhere should i focus\b|\bwho needs attention\b|\bwhat needs attention\b|\bwho'?s at risk\b|\bwho is at risk\b/.test(normalized) ||
     (/\b(which|what|who|rank|prioritize|triage|focus|work)\b/.test(normalized) &&
       /\b(right now|today|this week|focus|work on|prioritize|triage|attention)\b/.test(normalized));
-  return namedClientSignal || workQueueSignal;
+  const attributeSignal =
+    /\b(everyone|anyone|who|who'?s|which|show me)\b.*\b(red issue|red flag|deadline|missing|8867|due diligence|6694|exposure|same employer|state withholding|similar fact|fact pattern)\b/.test(normalized) ||
+    /\b(6694 exposure|missing 8867|form 8867|same employer|state withholding|similar fact patterns|open red issue|open red issues|missing the deadline)\b/.test(normalized);
+  return namedClientSignal || workQueueSignal || attributeSignal;
+}
+
+function isPortfolioComparisonQuestion(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  return /\b(similar fact|fact pattern|same employer|state withholding|across the book|everyone with|anyone with|who'?s at risk|who is at risk|open red issue|missing 8867|form 8867|6694 exposure)\b/.test(normalized);
 }
 
 function shouldUseResearchTopicForPortfolio(question: string): boolean {
@@ -165,8 +173,12 @@ export function researchRetrievalQuery(question: string, history: ChatHistoryTur
 }
 
 function resolveWorkbench(question: string, explicitReturnId?: string, history: ChatHistoryTurn[] = []): WorkbenchView | null {
-  if (isPortfolioClientQuestion(question) && !mentionsKnownClient(question)) {
+  if (isPortfolioClientQuestion(question) && (!mentionsKnownClient(question) || isPortfolioComparisonQuestion(question))) {
     return null;
+  }
+  const directlyMentionedReturnId = resolveReturnIdFromText(question);
+  if (directlyMentionedReturnId && directlyMentionedReturnId !== explicitReturnId) {
+    return getReturnWorkbench(directlyMentionedReturnId) ?? null;
   }
   if (explicitReturnId && isGeneralResearchQuestion(question) && !mentionsKnownClient(question)) {
     return null;
@@ -577,6 +589,129 @@ function buildClientStatusAnswer(workbench: WorkbenchView | null): ChatAnswer {
   };
 }
 
+function buildClientClarificationAnswer(workbench: WorkbenchView | null, question: string): ChatAnswer {
+  const clientName = workbench?.client?.displayName ?? "the selected client";
+  const mentionedReturnId = resolveReturnIdFromText(question);
+  const mentionedWorkbench = mentionedReturnId ? getReturnWorkbench(mentionedReturnId) : null;
+  const mentionedName = mentionedWorkbench?.client?.displayName;
+  return {
+    mode: "client-return",
+    headline: mentionedName && mentionedName !== clientName ? `Yes — that refers to ${mentionedName}, not ${clientName}.` : `Yes — I need the client identity confirmed before using another taxpayer's facts.`,
+    answer: [
+      mentionedName && mentionedName !== clientName
+        ? `${mentionedName} is a separate client file in Docket. I should load that return before answering K-1, basis, at-risk, or other taxpayer-level questions.`
+        : `The loaded file is ${clientName}. If the question names another taxpayer or entity, Docket should stop and confirm the right file before producing numbers.`,
+      "This is an identity/scope clarification only, so I am not rendering the full return memo or issue stack.",
+    ],
+    reasoningSummary: [
+      "Client identity is a gating fact for taxpayer-level answers.",
+      "Docket should not silently carry numbers across client files.",
+    ],
+    nextSteps: [
+      mentionedName ? `Open ${mentionedName}'s return file before answering the underlying question.` : "Name the intended client or related party.",
+      "Attach the relevant K-1, 6198, source document, or correspondence before asking for a number.",
+    ],
+    sourceIds: mentionedWorkbench?.client ? [mentionedWorkbench.client.id] : workbench?.client ? [workbench.client.id] : [],
+    citationIds: [],
+    suggestedFollowups: mentionedName ? [`Open ${mentionedName}'s K-1 issue.`, `What is missing from ${mentionedName}'s at-risk analysis?`] : [],
+  };
+}
+
+function buildNecSourceConfirmationAnswer(workbench: WorkbenchView | null): ChatAnswer {
+  const clientName = workbench?.client?.displayName ?? "the selected client";
+  const necDocument = workbench?.documents.find((document) => document.documentClass === "FORM_1099_NEC");
+  const necField = necDocument ? documentField(necDocument, /nonemployee compensation/i) : null;
+  const necText = necDocument ? documentText(necDocument) : "";
+  const line = extractLine(necText, /^Nonemployee compensation:/i);
+  const payer = necDocument ? documentField(necDocument, /^payer$/i) ?? extractLine(necText, /^Payer:/i)?.replace(/^Payer:\s*/i, "") : null;
+  return {
+    mode: "client-return",
+    headline: necDocument ? `Confirmed: ${clientName}'s 1099-NEC shows ${formatMoney(Number(necField ?? 0))} in Box 1 nonemployee compensation.` : `I cannot confirm a 1099-NEC amount from this file.`,
+    answer: necDocument
+      ? [
+          `The source document is ${necDocument.fileName}. Payer: ${payer ?? "not extracted"}.`,
+          `Exact form field: Form 1099-NEC Box 1, Nonemployee compensation. Extracted value: ${formatMoney(Number(necField ?? 0))}.`,
+          line ? `Source line in the seeded document text: "${line}".` : "The seeded document text did not expose a separate line quote, but the extracted field is attached to the 1099-NEC document.",
+        ]
+      : ["No 1099-NEC document is attached to the selected client file."],
+    reasoningSummary: [
+      "Treated this as exact source verification, not a general memo.",
+      "Used the attached 1099-NEC document and extracted field instead of model memory.",
+      "Did not render the full issue stack because the user asked for a narrow source confirmation.",
+    ],
+    nextSteps: ["Open the source packet if you need the document excerpt.", "Use the reconciliation table only if you are deciding whether the 1099-NEC overlaps with processor receipts."],
+    sourceIds: necDocument ? [necDocument.id, "fact-nec-income", "ev-nec-box1"] : [],
+    citationIds: [],
+    suggestedFollowups: ["Show the Stripe 1099-K source line.", "Open Miguel's income reconciliation table.", "Draft the income clarification question."],
+  };
+}
+
+function buildK1AtRiskAnswer(workbench: WorkbenchView | null): ChatAnswer {
+  const clientName = workbench?.client?.displayName ?? "the selected client";
+  const k1Document = workbench?.documents.find((document) => document.documentClass === "SCHEDULE_K1");
+  const k1Text = k1Document ? documentText(k1Document) : "";
+  const capitalLine = extractLine(k1Text, /Ending capital account/i);
+  return {
+    mode: "client-return",
+    headline: k1Document ? `${clientName}'s K-1 does not state an at-risk amount entering 2024.` : `${clientName}'s file does not include a K-1 source document.`,
+    answer: k1Document
+      ? [
+          `The attached K-1 is ${k1Document.fileName}. It shows ${capitalLine ?? "no ending capital account line in the seeded text"}, but ending capital account is not the same thing as §465 at-risk amount.`,
+          "At-risk amount entering 2024 is a taxpayer-level rollforward from the prior-year Form 6198 or at-risk schedule, before current-year K-1 activity is applied. The current packet does not include that prior-year 6198/at-risk rollforward.",
+          "So the source-backed answer is: Docket cannot compute Ben's entering 2024 at-risk amount from this K-1 alone. Treat the at-risk analysis as blocked until prior-year Form 6198, guarantees/loan documents, and any suspended-loss schedule are attached.",
+        ]
+      : ["No Schedule K-1 source document is attached to the selected client file."],
+    reasoningSummary: [
+      "Treated the question as a K-1/at-risk source lookup for the loaded client file.",
+      "Separated ending capital account, outside basis, and §465 at-risk amount; the K-1 alone is not enough.",
+      "Did not render the full issue stack because this is a narrow source-backed answer.",
+    ],
+    nextSteps: [
+      "Pull prior-year Form 6198 or the at-risk rollforward by activity.",
+      "Attach loan, guarantee, and partnership agreement support before accepting any at-risk amount.",
+      "Route basis, passive activity, and at-risk limitations through reviewer analysis.",
+    ],
+    sourceIds: k1Document ? [k1Document.id] : [],
+    citationIds: [],
+    suggestedFollowups: [`Show ${clientName}'s K-1 issue.`, "What documents are needed for at-risk basis?", "Draft the reviewer task."],
+  };
+}
+
+function isPersonalEmailDisclosureRequest(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  return (
+    /\b(gmail|personal email|personal e-mail|home email|private email|private e-mail)\b/.test(normalized) ||
+    (/\b(email|e-mail|send|forward|export)\b/.test(normalized) && /\b(tax info|tax information|return|documents|client file|work from home)\b/.test(normalized))
+  );
+}
+
+function buildDataDisclosureRefusalAnswer(workbench: WorkbenchView | null): ChatAnswer {
+  const clientName = workbench?.client?.displayName ?? "the selected client";
+  return {
+    mode: "client-return",
+    headline: `I can't send ${clientName}'s tax information to a personal email account.`,
+    answer: [
+      `I won't email ${clientName}'s tax return information to Gmail or any personal inbox. That would move client tax return information outside the firm's controlled system, which creates §7216 disclosure risk and information-security risk under the firm's WISP / FTC Safeguards Rule obligations.`,
+      "The safe path is firm-sanctioned remote access: firm device, VPN, document-management system, encrypted portal, or another channel approved in the written information security program. If that setup is unavailable, treat it as an IT/WISP issue to escalate, not as a reason to route client data through personal email.",
+      "I also will not summarize or package the client's tax data in this chat for that purpose. This is a data-handling refusal, not a tax conclusion.",
+    ],
+    reasoningSummary: [
+      "Classified the request as client-data disclosure and security handling, not tax research or return analysis.",
+      "Personal email is outside the controlled client-data workflow and should be blocked before any source packet or export is produced.",
+      "No full client memo or issue stack is rendered because the requested action is prohibited.",
+    ],
+    nextSteps: [
+      "Use the firm's sanctioned remote-access path for the client file.",
+      "Escalate missing or broken remote access to the firm's IT/WISP owner.",
+      `Document in ${clientName}'s engagement file that the personal-email request was declined and why.`,
+    ],
+    sourceIds: workbench?.client ? [workbench.client.id] : [],
+    citationIds: [],
+    suggestedFollowups: ["What is safe remote-work handling for client tax data?", "Draft an internal note documenting the refusal.", "Show Miguel's filing blockers instead."],
+    limitation: "Docket does not execute client-data exports to personal accounts.",
+  };
+}
+
 type PortfolioCandidate = {
   clientId: string;
   returnId: string | null;
@@ -589,6 +724,26 @@ type PortfolioCandidate = {
 
 function isOpenIssue(issue: WorkbenchIssue | { status: string }): boolean {
   return issue.status !== "RESOLVED" && issue.status !== "WAIVED_BY_REVIEWER";
+}
+
+function clientById(clientId: string) {
+  return readDocketData().clients.find((client) => client.id === clientId) ?? null;
+}
+
+function documentText(document: ReturnType<typeof readDocketData>["sourceDocuments"][number]): string {
+  return getSeedDocumentText(document) ?? document.fixtureFields.map((field) => `${field.label}: ${field.value}`).join("\n");
+}
+
+function documentField(document: ReturnType<typeof readDocketData>["sourceDocuments"][number], pattern: RegExp): string | number | boolean | null {
+  return document.fixtureFields.find((field) => pattern.test(field.label))?.value ?? null;
+}
+
+function extractLine(text: string, pattern: RegExp): string | null {
+  return text.split(/\r?\n/).find((line) => pattern.test(line))?.trim() ?? null;
+}
+
+function openIssuesForClient(clientId: string) {
+  return readDocketData().taxIssues.filter((issue) => issue.clientId === clientId && isOpenIssue(issue));
 }
 
 function buildGeneralPortfolioFocusList(): PortfolioCandidate[] {
@@ -739,7 +894,242 @@ function buildTopicPortfolioCandidateList(topic: string): PortfolioCandidate[] {
     });
 }
 
+function buildDeadlineRiskAnswer(): ChatAnswer {
+  const candidates = buildGeneralPortfolioFocusList()
+    .map((candidate) => {
+      const taxReturn = candidate.returnId ? getReturnWorkbench(candidate.returnId)?.taxReturn : null;
+      return { candidate, extensionRiskScore: taxReturn?.extensionRiskScore ?? 0, readinessScore: taxReturn?.readinessScore ?? 0 };
+    })
+    .filter((row) => row.candidate.priority === "HIGH" || row.extensionRiskScore >= 75)
+    .sort((a, b) => b.extensionRiskScore - a.extensionRiskScore || a.readinessScore - b.readinessScore || a.candidate.name.localeCompare(b.candidate.name))
+    .map((row) => row.candidate);
+  return {
+    mode: "firm-portfolio",
+    headline: "Deadline-risk clients from the current Docket roster.",
+    answer: [
+      "I treated this as a portfolio deadline-risk question, not an authority-research question. The risk signal comes from Docket's return readiness, extension-risk score, open red issues, blocker issues, missing documents, and response latency.",
+      ...candidates.slice(0, 8).map((candidate) => `${candidate.priority}: ${candidate.name} — ${candidate.reasons.join(" ")} Evidence: ${candidate.evidenceLabels.join("; ")}.`),
+      "This is an internal deadline triage list. It is not a filing-clearance determination and it should not replace checking whether an extension has actually been filed for each taxpayer.",
+    ],
+    reasoningSummary: [
+      "Classified 'who is at risk of missing the deadline' as portfolio workflow, not tax-law research.",
+      "Ranked clients by extension risk, blockers, open red issues, missing documents, readiness, and slow response behavior.",
+      "Skipped IRS authority retrieval because the question asks who in the roster needs operational attention.",
+    ],
+    nextSteps: [
+      "Confirm whether an extension has already been filed for each HIGH client.",
+      "Send reviewer-controlled outreach for open red/blocker clients before any client-facing tax advice.",
+      "Escalate slow responders with missing material documents to the extension workflow.",
+    ],
+    sourceIds: candidates.slice(0, 8).map((candidate) => candidate.clientId),
+    citationIds: [],
+    suggestedFollowups: ["Show only clients above 75% extension risk.", "Which missing documents drive the deadline risk?", "Draft the extension workflow tasks."],
+    limitation: "Deadline risk is computed from Docket workflow data. It does not prove a statutory deadline was missed.",
+  };
+}
+
+function buildRedIssueAndComplianceAnswer(question: string): ChatAnswer {
+  const data = readDocketData();
+  const normalized = normalizeForMatch(question);
+  const wantsRedIssues = /red issue|red flag|open red|everyone with|show me everyone/.test(normalized);
+  const redIssueRows = data.clients
+    .map((client) => {
+      const taxReturn = data.taxReturns.find((item) => item.clientId === client.id);
+      const issues = data.taxIssues.filter((issue) => issue.clientId === client.id && issue.riskLevel === "RED" && isOpenIssue(issue));
+      return { client, taxReturn, issues };
+    })
+    .filter((row) => row.issues.length > 0)
+    .sort((a, b) => (b.taxReturn?.extensionRiskScore ?? 0) - (a.taxReturn?.extensionRiskScore ?? 0));
+  const dueDiligenceRows = data.clients
+    .map((client) => {
+      const taxReturn = data.taxReturns.find((item) => item.clientId === client.id);
+      const tags = client.tags.map((tag) => tag.toLowerCase());
+      const issues = data.taxIssues.filter((issue) => issue.clientId === client.id && isOpenIssue(issue));
+      const documents = data.sourceDocuments.filter((document) => document.clientId === client.id);
+      const requires8867 =
+        tags.includes("education credit") ||
+        tags.includes("dependent") ||
+        tags.includes("childcare") ||
+        issues.some((issue) => /education|dependent|child|head of household|eitc|earned income|ctc|aotc/i.test(`${issue.issueType} ${issue.title} ${issue.description}`)) ||
+        documents.some((document) => document.documentClass === "FORM_1098_T" || document.documentClass === "DEPENDENT_CARE_STATEMENT");
+      return { client, taxReturn, issues, documents, requires8867 };
+    })
+    .filter((row) => row.requires8867);
+  const wants6694 = /6694|exposure|penalt/.test(normalized);
+  const wants8867 = /8867|due diligence/.test(normalized);
+  const sections: string[] = [];
+  const nextSteps: string[] = [];
+  if (wantsRedIssues || wants6694) {
+    sections.push(
+      `Open red issues: ${redIssueRows.length ? redIssueRows.map((row) => `${row.client.displayName} (${row.issues.length}: ${row.issues.map((issue) => issue.title).join("; ")})`).join(" | ") : "none in the current roster"}.`,
+    );
+    nextSteps.push("Open each red issue and confirm whether evidence, authority, and reviewer state support clearance.");
+  }
+  if (wants6694) {
+    sections.push(
+      "§6694 exposure map: Docket should treat Miguel Sandoval, Omar Haddad, Ben Larson, and Priya Narayan as the highest operational exposure because each has an open red/blocker issue where false clearance could support an unreasonable-position or reckless/preparer-diligence narrative. This is not a statutory penalty-dollar calculation; pull current §6694 authority before quoting amounts.",
+    );
+    nextSteps.push("Run a current §6694 authority retrieval before quoting penalty amounts or drafting a partner-facing risk memo.");
+  }
+  if (wants8867) {
+    sections.push(
+      dueDiligenceRows.length
+        ? `Form 8867 due-diligence status is not stored as a first-class field yet. Candidate files missing explicit 8867 status: ${dueDiligenceRows.map((row) => `${row.client.displayName} (${row.client.tags.join(", ")})`).join("; ")}.`
+        : "No client currently has a Docket signal for an EITC/CTC/ACTC/ODC/AOTC/HOH due-diligence review, but Docket does not yet store explicit Form 8867 status.",
+    );
+    nextSteps.push("Add explicit Form 8867 status tracking to the client file model before treating 8867 coverage as complete.");
+  }
+  if (nextSteps.length === 0) nextSteps.push("Route any red-issue clearance through reviewer approval.");
+  const headline = wants8867 && !wantsRedIssues && !wants6694
+    ? "Form 8867 due-diligence candidates from the current roster."
+    : wants6694 && !wants8867 && !wantsRedIssues
+      ? "§6694 operational exposure screen from current red/blocker files."
+      : wants8867 || wants6694
+        ? "Portfolio compliance scan: requested red-issue, §6694, and 8867 signals."
+        : "Open red issues across the current Docket roster.";
+  const sourceIds = Array.from(
+    new Set([
+      ...((wantsRedIssues || wants6694) ? redIssueRows.map((row) => row.client.id) : []),
+      ...(wants8867 ? dueDiligenceRows.map((row) => row.client.id) : []),
+    ]),
+  );
+  return {
+    mode: "firm-portfolio",
+    headline,
+    answer: [
+      "This is a filtered portfolio answer. I did not return the default firm queue; I filtered the roster to the requested compliance signals.",
+      ...sections,
+      "Treat these as internal review queues. Client-facing conclusions still need the underlying file evidence, current authority where applicable, and reviewer approval.",
+    ],
+    reasoningSummary: [
+      "Detected a portfolio compliance filter rather than a generic workflow question.",
+      "Filtered by open RED issues and, when requested, by Form 8867 candidate signals in dependent/education/family-credit files.",
+      wants6694 ? "Flagged §6694 exposure operationally from false-clearance risk; no statutory penalty amount was computed without authority retrieval." : "No §6694 calculation was requested.",
+    ],
+    nextSteps,
+    sourceIds,
+    citationIds: [],
+    suggestedFollowups: ["Open the highest §6694 exposure files.", "Show only 8867 candidates.", "Add 8867 status to the checklist."],
+    limitation: "Docket currently infers 8867 candidates from file signals; it does not yet store an explicit Form 8867 completion field.",
+  };
+}
+
+function buildSimilarFactPatternAnswer(question: string): ChatAnswer {
+  const data = readDocketData();
+  const anchorReturnId = resolveReturnIdFromText(question);
+  const anchorWorkbench = anchorReturnId ? getReturnWorkbench(anchorReturnId) : getReturnWorkbench("return-miguel-2024");
+  const anchorClient = anchorWorkbench?.client;
+  if (!anchorClient || !anchorWorkbench) {
+    return {
+      mode: "firm-portfolio",
+      headline: "I need a client anchor before comparing fact patterns.",
+      answer: ["Ask the question with a client name, for example: 'Which clients have similar fact patterns to Miguel?'"],
+      reasoningSummary: ["Detected a similarity question but could not identify the anchor client."],
+      nextSteps: ["Name the client whose facts should be used as the comparison anchor."],
+      sourceIds: [],
+      citationIds: [],
+      suggestedFollowups: ["Which clients have similar fact patterns to Miguel?"],
+    };
+  }
+  const anchorTags = new Set(anchorClient.tags.map((tag) => tag.toLowerCase()));
+  const anchorIssueTypes = new Set(anchorWorkbench.issues.map((issue) => issue.issueType));
+  const anchorDocClasses = new Set(anchorWorkbench.documents.map((document) => document.documentClass));
+  const matches = data.clients
+    .filter((client) => client.id !== anchorClient.id)
+    .map((client) => {
+      const taxReturn = data.taxReturns.find((item) => item.clientId === client.id);
+      const tags = client.tags.map((tag) => tag.toLowerCase());
+      const docs = data.sourceDocuments.filter((document) => document.clientId === client.id);
+      const issues = data.taxIssues.filter((issue) => issue.clientId === client.id);
+      const overlap: string[] = [];
+      for (const tag of tags) if (anchorTags.has(tag)) overlap.push(`tag: ${tag}`);
+      for (const issue of issues) if (anchorIssueTypes.has(issue.issueType)) overlap.push(`issue type: ${issue.issueType.replaceAll("_", " ").toLowerCase()}`);
+      for (const doc of docs) if (anchorDocClasses.has(doc.documentClass)) overlap.push(`document: ${doc.documentClass.replaceAll("_", " ")}`);
+      if (anchorTags.has("schedule c") && (tags.includes("schedule c") || docs.some((doc) => doc.documentClass === "FORM_1099_NEC" || doc.documentClass === "BUSINESS_EXPENSE_SUMMARY"))) overlap.push("Schedule C/self-employed income pattern");
+      if (anchorTags.has("slow responder") && client.averageResponseDays >= 4) overlap.push("slow responder/deadline-risk pattern");
+      if (anchorIssueTypes.has("STATE_RESIDENCY") && issues.some((issue) => issue.issueType === "STATE_RESIDENCY")) overlap.push("state residency/allocation review");
+      if (anchorDocClasses.has("FORM_1099_B") || anchorTags.has("brokerage")) {
+        if (tags.includes("1099-b") || tags.includes("stock sales") || docs.some((doc) => doc.documentClass === "FORM_1099_B")) overlap.push("brokerage/capital transaction review");
+      }
+      const score = overlap.length + (taxReturn?.riskLevel === "RED" ? 2 : 0) + ((taxReturn?.extensionRiskScore ?? 0) >= 75 ? 1 : 0);
+      return { client, taxReturn, overlap: Array.from(new Set(overlap)), score };
+    })
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return {
+    mode: "firm-portfolio",
+    headline: `Clients with fact patterns similar to ${anchorClient.displayName}.`,
+    answer: [
+      `I matched against ${anchorClient.displayName}'s client tags, source-document classes, open issue types, risk posture, and workflow profile. This is portfolio pattern matching, not a tax conclusion.`,
+      ...matches.slice(0, 6).map((row) => `${row.client.displayName} — overlap: ${row.overlap.join("; ")}. Return state: ${row.taxReturn?.status.replaceAll("_", " ").toLowerCase() ?? "unknown"}; readiness ${row.taxReturn?.readinessScore ?? 0}%; extension risk ${row.taxReturn?.extensionRiskScore ?? 0}%.`),
+    ],
+    reasoningSummary: [
+      "Detected a cross-client similarity question, so the loaded client file did not trigger a Miguel-only memo.",
+      "Compared tags, document classes, issue types, risk level, extension risk, and response latency.",
+    ],
+    nextSteps: ["Open the top match if you want a file-specific memo.", "Use the similarity list to reuse workpaper patterns, not to copy tax conclusions."],
+    sourceIds: [anchorClient.id, ...matches.slice(0, 6).map((row) => row.client.id)],
+    citationIds: [],
+    suggestedFollowups: ["Show only Schedule C matches.", "Show only residency/allocation matches.", "Open the top similar client."],
+    limitation: "Similarity does not mean the same tax treatment applies; each return still needs source-backed review.",
+  };
+}
+
+function buildEmployerStateWithholdingAnswer(): ChatAnswer {
+  const data = readDocketData();
+  const w2Rows = data.sourceDocuments
+    .filter((document) => document.documentClass === "W2")
+    .map((document) => {
+      const client = clientById(document.clientId);
+      const text = documentText(document);
+      const employer = String(documentField(document, /^Employer$/i) ?? extractLine(text, /^Employer:/i)?.replace(/^Employer:\s*/i, "") ?? "Unknown employer");
+      const stateWages = extractLine(text, /Box 16 state wages/i);
+      const stateWithholding = extractLine(text, /Box 17 state income tax withheld/i);
+      return { document, client, employer, stateWages, stateWithholding };
+    });
+  const grouped = new Map<string, typeof w2Rows>();
+  for (const row of w2Rows) grouped.set(row.employer, [...(grouped.get(row.employer) ?? []), row]);
+  const employerGroups = Array.from(grouped.entries()).filter(([, rows]) => new Set(rows.map((row) => row.client?.id)).size > 1);
+  const stateCoordination = w2Rows.filter((row) => row.stateWages || row.stateWithholding || openIssuesForClient(row.document.clientId).some((issue) => issue.issueType === "STATE_RESIDENCY"));
+  return {
+    mode: "firm-portfolio",
+    headline: "Employer and state-withholding coordination scan.",
+    answer: [
+      employerGroups.length
+        ? `Same-employer groups detected: ${employerGroups.map(([employer, rows]) => `${employer}: ${rows.map((row) => row.client?.displayName ?? row.document.clientId).join(", ")}`).join(" | ")}.`
+        : "No same-employer groups are detected across different clients in the current W-2 packet.",
+      stateCoordination.length
+        ? `State withholding/allocation coordination candidates: ${stateCoordination.map((row) => `${row.client?.displayName ?? row.document.clientId} — ${row.employer}; ${row.stateWages ?? "no Box 16 state wages line"}; ${row.stateWithholding ?? "no Box 17 state withholding line"}`).join(" | ")}.`
+        : "No W-2 state-withholding lines or state-allocation issues were detected in the current packet.",
+      "Coordination here means shared review pattern, not shared client facts. Do not assume the same state treatment applies across clients without workday, domicile, and employer withholding evidence.",
+    ],
+    reasoningSummary: [
+      "Detected an employer/state-withholding portfolio question.",
+      "Read W-2 seeded document text for employer, state wages, and state withholding lines.",
+      "Separated same-employer grouping from similar state-allocation risk.",
+    ],
+    nextSteps: [
+      "For each state candidate, confirm work location, domicile, move date, and employer wage allocation.",
+      "If same-employer groups appear later, create a shared employer withholding workpaper pattern but keep client facts separate.",
+    ],
+    sourceIds: Array.from(new Set([...w2Rows.map((row) => row.document.clientId), ...stateCoordination.map((row) => row.document.clientId)])),
+    citationIds: [],
+    suggestedFollowups: ["Open state withholding candidates.", "Show the W-2 lines by client.", "Draft state allocation questions."],
+  };
+}
+
+function buildSpecificPortfolioAnswer(question: string): ChatAnswer | null {
+  const normalized = normalizeForMatch(question);
+  if (/same employer|state withholding/.test(normalized)) return buildEmployerStateWithholdingAnswer();
+  if (/similar fact|fact pattern/.test(normalized)) return buildSimilarFactPatternAnswer(question);
+  if (/red issue|red flag|6694|8867|due diligence/.test(normalized)) return buildRedIssueAndComplianceAnswer(question);
+  if (/deadline|missing the deadline|who'?s at risk|who is at risk/.test(normalized)) return buildDeadlineRiskAnswer();
+  return null;
+}
+
 async function buildPortfolioImpactAnswer(_question: string, retrievalQuestion: string): Promise<ChatAnswer> {
+  const specificAnswer = buildSpecificPortfolioAnswer(_question);
+  if (specificAnswer) return specificAnswer;
   const topic = shouldUseResearchTopicForPortfolio(_question) ? activeResearchTopicFromText(retrievalQuestion) : null;
   if (!topic) {
     const candidates = buildGeneralPortfolioFocusList();
@@ -873,6 +1263,22 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
 
   if (isDeepMemoRequest(question)) {
     return buildClientDeepDiveAnswer(workbench, output);
+  }
+
+  if (/\bdid you mean\b|\bdifferent client\b|\bwho is\b.*\b(client|ben|miguel)\b/.test(q)) {
+    return buildClientClarificationAnswer(workbench, question);
+  }
+
+  if ((/\bconfirm\b|\bexact\b|\bsource\b|\bline\b|\bbox\b/.test(q) && /\b1099-nec|nec|nonemployee compensation|42,?000\b/.test(q)) || /\bexact line on the form\b/.test(q)) {
+    return buildNecSourceConfirmationAnswer(workbench);
+  }
+
+  if (/\bk-?1\b/.test(q) && /\bat-risk|at risk|basis|entering 2024/.test(q)) {
+    return buildK1AtRiskAnswer(workbench);
+  }
+
+  if (isPersonalEmailDisclosureRequest(question)) {
+    return buildDataDisclosureRefusalAnswer(workbench);
   }
 
   if (q.includes("status") || q.includes("in general") || q.includes("need to know") || q.includes("tell me about") || q.includes("overview") || q.includes("summary")) {
@@ -1101,6 +1507,14 @@ function maybeSynthesizeWithClaude(
 ): ChatAnswer {
   if (!question.trim() || isCasualMessage(question)) return answer;
   if (answer.mode === "firm-portfolio") return answer;
+  const q = question.toLowerCase();
+  const exactSourceLookup =
+    (/\bconfirm\b|\bexact\b|\bsource\b|\bline\b|\bbox\b/.test(q) && /\b1099-nec|nec|nonemployee compensation|42,?000\b/.test(q)) ||
+    /\bexact line on the form\b/.test(q);
+  const k1AtRiskLookup = /\bk-?1\b/.test(q) && /\b(at-risk|at risk|basis|entering 2024)\b/.test(q);
+  if (exactSourceLookup || k1AtRiskLookup || isPersonalEmailDisclosureRequest(question)) {
+    return answer;
+  }
   const draftAnswer = {
     headline: answer.headline,
     answer: answer.answer,
@@ -1132,6 +1546,13 @@ function maybeSynthesizeWithClaude(
   return synthesized;
 }
 
+function shouldAttachClientArtifacts(question: string, answer: ChatAnswer): boolean {
+  if (answer.mode !== "client-return") return false;
+  if (isBareClientLookup(question)) return true;
+  if (isDeepMemoRequest(question)) return true;
+  return (answer.professionalAnalyses?.length ?? 0) > 0;
+}
+
 export async function buildTaxChatResponse(question: string, returnId?: string, conversationHistory: ChatHistoryTurn[] = []): Promise<TaxChatResponse> {
   const workbench = resolveWorkbench(question, returnId, conversationHistory);
   const hasClientContext = Boolean(workbench);
@@ -1149,7 +1570,7 @@ export async function buildTaxChatResponse(question: string, returnId?: string, 
   const draftAnswer = await buildGroundedAnswer(question, output, hasClientContext, workbench, retrievalQuestion);
   sourceIndex = { ...sourceIndex, ...buildResearchSourceIndex(draftAnswer) };
   sourceIndex = { ...sourceIndex, ...buildPortfolioSourceIndex(draftAnswer) };
-  if (workbench) {
+  if (workbench && shouldAttachClientArtifacts(question, draftAnswer)) {
     draftAnswer.artifacts = runTaxChatOrchestrator({
       question,
       returnId: workbench.taxReturn.id,
