@@ -171,7 +171,7 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
       <div className="chat-avatar">AI</div>
       <div className="memo-workspace">
         <div className="memo-document">
-          <div className="memo-breadcrumb">Clients / Miguel Sandoval / Tax year 2024</div>
+          <div className="memo-breadcrumb">Clients / {response.contextLabel ?? "Selected return"}</div>
           <header className="memo-header">
             <h2>{answer.headline}</h2>
             <p>Memo · Generated just now · Reasoning: {issueCount} issues analyzed · Sources linked inline</p>

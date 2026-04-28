@@ -1,4 +1,20 @@
-import type { DocketData, EvidenceRef, TaxFact } from "./types";
+import type {
+  Client,
+  ClientClarification,
+  ClientContact,
+  DeductionOpportunity,
+  DocketData,
+  Engagement,
+  EvidenceRef,
+  MissingDocument,
+  SourceDocument,
+  TaxFlag,
+  TaxHouseholdMember,
+  TaxIssue,
+  TaxReturn,
+  TaxReturnStatus,
+  TaxFact,
+} from "./types";
 
 export const NOW = "2026-04-26T12:00:00.000Z";
 
@@ -145,6 +161,534 @@ const fact = (
   acceptedAt: status === "ACCEPTED" ? NOW : null,
 });
 
+type ClientSeedProfile = {
+  slug: string;
+  displayName: string;
+  email: string;
+  phone: string;
+  responsivenessScore: number;
+  averageResponseDays: number;
+  tags: string[];
+  returnType: string;
+  status: TaxReturnStatus;
+  readinessScore: number;
+  extensionRiskScore: number;
+  riskLevel: "GREEN" | "YELLOW" | "RED";
+  preparerId: string;
+  reviewerId: string;
+  engagementName: string;
+  scopes: Engagement["scopes"][number]["scopeType"][];
+  household: Array<{ name: string; relationship: TaxHouseholdMember["relationship"]; studentStatus?: string | null }>;
+  documents: Array<{ id: string; fileName: string; documentClass: SourceDocument["documentClass"]; processed: boolean }>;
+  missingDocuments: Array<{ id: string; expectedDocumentClass: MissingDocument["expectedDocumentClass"]; reason: string; severity: "GREEN" | "YELLOW" | "RED"; status?: MissingDocument["status"] }>;
+  issues: Array<{ id: string; issueType: string; title: string; description: string; riskLevel: "GREEN" | "YELLOW" | "RED"; blocker: boolean; status?: TaxIssue["status"]; recommendedAction: string }>;
+  flags: Array<{ id: string; riskLevel: "GREEN" | "YELLOW" | "RED"; label: string; reason: string }>;
+};
+
+const additionalClientProfiles: ClientSeedProfile[] = [
+  {
+    slug: "avery-chen",
+    displayName: "Avery Chen",
+    email: "avery.chen@example.com",
+    phone: "555-0131",
+    responsivenessScore: 82,
+    averageResponseDays: 1.4,
+    tags: ["W-2", "RSUs", "green-ready"],
+    returnType: "Individual 1040",
+    status: "IN_REVIEW",
+    readinessScore: 92,
+    extensionRiskScore: 18,
+    riskLevel: "GREEN",
+    preparerId: IDS.preparer,
+    reviewerId: IDS.reviewer,
+    engagementName: "2024 Individual 1040",
+    scopes: ["1040"],
+    household: [{ name: "Avery Chen", relationship: "TAXPAYER" }],
+    documents: [
+      { id: "w2", fileName: "Nimbus_W2_2024.pdf", documentClass: "W2", processed: true },
+      { id: "1099div", fileName: "Fidelity_1099_DIV_2024.pdf", documentClass: "FORM_1099_DIV", processed: true },
+    ],
+    missingDocuments: [],
+    issues: [],
+    flags: [{ id: "green-ready", riskLevel: "GREEN", label: "Ready for reviewer", reason: "All expected source documents are processed." }],
+  },
+  {
+    slug: "priya-narayan",
+    displayName: "Priya Narayan",
+    email: "priya.narayan@example.com",
+    phone: "555-0132",
+    responsivenessScore: 58,
+    averageResponseDays: 3.2,
+    tags: ["Schedule C", "marketplace insurance", "1095-A"],
+    returnType: "Individual 1040 + Schedule C",
+    status: "CLIENT_CLARIFICATION",
+    readinessScore: 54,
+    extensionRiskScore: 79,
+    riskLevel: "RED",
+    preparerId: IDS.preparer,
+    reviewerId: IDS.reviewer,
+    engagementName: "2024 1040 + Schedule C",
+    scopes: ["1040", "SCHEDULE_C"],
+    household: [{ name: "Priya Narayan", relationship: "TAXPAYER" }],
+    documents: [
+      { id: "1099nec", fileName: "Atlas_1099_NEC_2024.pdf", documentClass: "FORM_1099_NEC", processed: true },
+      { id: "expenses", fileName: "Consulting_Expenses_2024.xlsx", documentClass: "BUSINESS_EXPENSE_SUMMARY", processed: true },
+    ],
+    missingDocuments: [{ id: "1095a", expectedDocumentClass: "FORM_1095_A", reason: "Client mentioned marketplace coverage in organizer.", severity: "RED" }],
+    issues: [
+      {
+        id: "marketplace-1095a",
+        issueType: "MISSING_1095_A",
+        title: "Marketplace coverage mentioned with no 1095-A",
+        description: "Organizer says Priya had marketplace insurance for part of 2024, but no Form 1095-A is uploaded.",
+        riskLevel: "RED",
+        blocker: true,
+        recommendedAction: "Request Form 1095-A before finalizing ACA-related return items.",
+      },
+    ],
+    flags: [{ id: "aca-blocker", riskLevel: "RED", label: "1095-A blocker", reason: "Marketplace insurance signal requires source document." }],
+  },
+  {
+    slug: "ben-larson",
+    displayName: "Ben Larson",
+    email: "ben.larson@example.com",
+    phone: "555-0133",
+    responsivenessScore: 44,
+    averageResponseDays: 4.6,
+    tags: ["rental", "K-1 expected", "extension likely"],
+    returnType: "Individual 1040 + Rental",
+    status: "DOCUMENT_COLLECTION",
+    readinessScore: 46,
+    extensionRiskScore: 83,
+    riskLevel: "RED",
+    preparerId: IDS.preparer,
+    reviewerId: IDS.reviewer,
+    engagementName: "2024 1040 + Rental",
+    scopes: ["1040", "EXTENSION"],
+    household: [{ name: "Ben Larson", relationship: "TAXPAYER" }],
+    documents: [{ id: "1098", fileName: "Rental_Mortgage_1098_2024.pdf", documentClass: "FORM_1098", processed: true }],
+    missingDocuments: [{ id: "k1", expectedDocumentClass: "UNKNOWN", reason: "Prior-year partnership K-1 pattern has not been resolved.", severity: "RED" }],
+    issues: [
+      {
+        id: "prior-k1-missing",
+        issueType: "MISSING_K1",
+        title: "Prior-year K-1 expected but missing",
+        description: "Prior-year return included a partnership K-1; no current-year K-1 or waiver is in the file.",
+        riskLevel: "RED",
+        blocker: true,
+        recommendedAction: "Ask whether the partnership interest still exists and request the current-year K-1.",
+      },
+    ],
+    flags: [{ id: "k1-extension", riskLevel: "RED", label: "Likely extension", reason: "K-1 expected and deadline risk is high." }],
+  },
+  {
+    slug: "jordan-ellis",
+    displayName: "Jordan Ellis",
+    email: "jordan.ellis@example.com",
+    phone: "555-0134",
+    responsivenessScore: 71,
+    averageResponseDays: 2.1,
+    tags: ["stock sales", "1099-B", "wash sale review"],
+    returnType: "Individual 1040",
+    status: "AI_PREP",
+    readinessScore: 68,
+    extensionRiskScore: 42,
+    riskLevel: "YELLOW",
+    preparerId: IDS.preparer,
+    reviewerId: IDS.reviewer,
+    engagementName: "2024 Individual 1040",
+    scopes: ["1040"],
+    household: [{ name: "Jordan Ellis", relationship: "TAXPAYER" }],
+    documents: [
+      { id: "w2", fileName: "Cedar_W2_2024.pdf", documentClass: "W2", processed: true },
+      { id: "1099b", fileName: "Schwab_Consolidated_1099_2024.pdf", documentClass: "FORM_1099_B", processed: true },
+    ],
+    missingDocuments: [],
+    issues: [
+      {
+        id: "wash-sale-review",
+        issueType: "CAPITAL_GAIN_REVIEW",
+        title: "Brokerage statement needs wash-sale review",
+        description: "Consolidated 1099 includes sales and wash-sale indicators; full capital gains automation is out of scope.",
+        riskLevel: "YELLOW",
+        blocker: false,
+        recommendedAction: "Route basis and wash-sale details through reviewer-supported tax software workflow.",
+      },
+    ],
+    flags: [{ id: "brokerage-review", riskLevel: "YELLOW", label: "Brokerage review", reason: "1099-B present; review required for unsupported calculation area." }],
+  },
+  {
+    slug: "sophia-martinez",
+    displayName: "Sophia Martinez",
+    email: "sophia.martinez@example.com",
+    phone: "555-0135",
+    responsivenessScore: 63,
+    averageResponseDays: 2.8,
+    tags: ["dependent", "education credit", "clarification"],
+    returnType: "Individual 1040",
+    status: "CLIENT_CLARIFICATION",
+    readinessScore: 73,
+    extensionRiskScore: 36,
+    riskLevel: "YELLOW",
+    preparerId: IDS.preparer,
+    reviewerId: IDS.reviewer,
+    engagementName: "2024 Individual 1040",
+    scopes: ["1040"],
+    household: [
+      { name: "Sophia Martinez", relationship: "TAXPAYER" },
+      { name: "Lena Martinez", relationship: "DEPENDENT", studentStatus: "FULL_TIME" },
+    ],
+    documents: [
+      { id: "w2", fileName: "Brightside_W2_2024.pdf", documentClass: "W2", processed: true },
+      { id: "organizer", fileName: "Client_Organizer_2024.pdf", documentClass: "CLIENT_ORGANIZER", processed: true },
+    ],
+    missingDocuments: [{ id: "1098t", expectedDocumentClass: "UNKNOWN", reason: "Education credit may apply; Form 1098-T not uploaded.", severity: "YELLOW" }],
+    issues: [
+      {
+        id: "education-credit-support",
+        issueType: "EDUCATION_CREDIT_SUPPORT",
+        title: "Education credit facts need support",
+        description: "Dependent is marked as a full-time student, but tuition support is not yet in the file.",
+        riskLevel: "YELLOW",
+        blocker: false,
+        recommendedAction: "Request 1098-T or tuition account statement before evaluating education credit.",
+      },
+    ],
+    flags: [{ id: "education-doc", riskLevel: "YELLOW", label: "Education support missing", reason: "Student dependent context creates possible credit support request." }],
+  },
+  {
+    slug: "nora-williams",
+    displayName: "Nora Williams",
+    email: "nora.williams@example.com",
+    phone: "555-0136",
+    responsivenessScore: 89,
+    averageResponseDays: 0.9,
+    tags: ["retired", "1099-R", "interest"],
+    returnType: "Individual 1040",
+    status: "READY_FOR_SIGNATURE",
+    readinessScore: 96,
+    extensionRiskScore: 9,
+    riskLevel: "GREEN",
+    preparerId: IDS.preparer,
+    reviewerId: IDS.reviewer,
+    engagementName: "2024 Individual 1040",
+    scopes: ["1040"],
+    household: [{ name: "Nora Williams", relationship: "TAXPAYER" }],
+    documents: [
+      { id: "1099r", fileName: "Vanguard_1099_R_2024.pdf", documentClass: "UNKNOWN", processed: true },
+      { id: "1099int", fileName: "Ally_1099_INT_2024.pdf", documentClass: "FORM_1099_INT", processed: true },
+    ],
+    missingDocuments: [],
+    issues: [],
+    flags: [{ id: "signature-ready", riskLevel: "GREEN", label: "Signature package ready", reason: "Reviewer cleared source-backed facts." }],
+  },
+  {
+    slug: "omar-haddad",
+    displayName: "Omar Haddad",
+    email: "omar.haddad@example.com",
+    phone: "555-0137",
+    responsivenessScore: 35,
+    averageResponseDays: 6.4,
+    tags: ["crypto mention", "unsupported scope", "advisory"],
+    returnType: "Individual 1040",
+    status: "EXTENSION_RECOMMENDED",
+    readinessScore: 39,
+    extensionRiskScore: 91,
+    riskLevel: "RED",
+    preparerId: IDS.preparer,
+    reviewerId: IDS.reviewer,
+    engagementName: "2024 Individual 1040",
+    scopes: ["1040", "EXTENSION"],
+    household: [{ name: "Omar Haddad", relationship: "TAXPAYER" }],
+    documents: [{ id: "w2", fileName: "Metro_W2_2024.pdf", documentClass: "W2", processed: true }],
+    missingDocuments: [{ id: "crypto", expectedDocumentClass: "UNKNOWN", reason: "Client mentioned crypto sales; tax-lot support is not uploaded.", severity: "RED" }],
+    issues: [
+      {
+        id: "crypto-unsupported",
+        issueType: "UNSUPPORTED_CRYPTO_TAX_LOTS",
+        title: "Crypto tax-lot accounting is out of scope",
+        description: "Client mentioned crypto disposals but no exchange export or tax-lot report is attached.",
+        riskLevel: "RED",
+        blocker: true,
+        recommendedAction: "Escalate unsupported crypto accounting and request exchange/tax-lot reports.",
+      },
+    ],
+    flags: [{ id: "unsupported-crypto", riskLevel: "RED", label: "Unsupported scope", reason: "Crypto tax-lot accounting is not automated in foundation release." }],
+  },
+  {
+    slug: "hannah-kim",
+    displayName: "Hannah Kim",
+    email: "hannah.kim@example.com",
+    phone: "555-0138",
+    responsivenessScore: 76,
+    averageResponseDays: 1.8,
+    tags: ["multi-state", "remote work", "CA/OR"],
+    returnType: "Individual 1040 + Multi-state issue detection",
+    status: "IN_REVIEW",
+    readinessScore: 81,
+    extensionRiskScore: 31,
+    riskLevel: "YELLOW",
+    preparerId: IDS.preparer,
+    reviewerId: IDS.reviewer,
+    engagementName: "2024 1040 + Multi-state",
+    scopes: ["1040", "MULTI_STATE_ISSUE_DETECTION"],
+    household: [{ name: "Hannah Kim", relationship: "TAXPAYER" }],
+    documents: [{ id: "w2", fileName: "Juniper_W2_2024.pdf", documentClass: "W2", processed: true }],
+    missingDocuments: [],
+    issues: [
+      {
+        id: "remote-work-state",
+        issueType: "STATE_RESIDENCY",
+        title: "Remote work state allocation needs review",
+        description: "Client worked remotely from Oregon while employer reported California wages.",
+        riskLevel: "YELLOW",
+        blocker: false,
+        recommendedAction: "Confirm workday allocation and route state treatment to reviewer.",
+      },
+    ],
+    flags: [{ id: "multi-state", riskLevel: "YELLOW", label: "State issue", reason: "Remote work facts may affect state allocation." }],
+  },
+  {
+    slug: "lucas-peterson",
+    displayName: "Lucas Peterson",
+    email: "lucas.peterson@example.com",
+    phone: "555-0139",
+    responsivenessScore: 67,
+    averageResponseDays: 2.5,
+    tags: ["childcare", "dependent care", "planning"],
+    returnType: "Individual 1040",
+    status: "DOCUMENT_COLLECTION",
+    readinessScore: 64,
+    extensionRiskScore: 44,
+    riskLevel: "YELLOW",
+    preparerId: IDS.preparer,
+    reviewerId: IDS.reviewer,
+    engagementName: "2024 Individual 1040",
+    scopes: ["1040", "TAX_PLANNING"],
+    household: [
+      { name: "Lucas Peterson", relationship: "TAXPAYER" },
+      { name: "Maya Peterson", relationship: "DEPENDENT" },
+    ],
+    documents: [{ id: "w2", fileName: "Northstar_W2_2024.pdf", documentClass: "W2", processed: true }],
+    missingDocuments: [{ id: "childcare", expectedDocumentClass: "UNKNOWN", reason: "Dependent care expenses mentioned without provider EIN/support.", severity: "YELLOW" }],
+    issues: [
+      {
+        id: "dependent-care-support",
+        issueType: "DEPENDENT_CARE_SUPPORT",
+        title: "Dependent care provider facts missing",
+        description: "Client organizer mentions childcare, but provider name, EIN, and amount support are missing.",
+        riskLevel: "YELLOW",
+        blocker: false,
+        recommendedAction: "Request provider details and payment support before evaluating dependent care credit.",
+      },
+    ],
+    flags: [{ id: "childcare-support", riskLevel: "YELLOW", label: "Dependent care support", reason: "Credit opportunity needs provider facts." }],
+  },
+];
+
+const additionalClients: Client[] = additionalClientProfiles.map((profile) => ({
+  id: `client-${profile.slug}`,
+  firmId: IDS.firm,
+  displayName: profile.displayName,
+  email: profile.email,
+  phone: profile.phone,
+  responsivenessScore: profile.responsivenessScore,
+  averageResponseDays: profile.averageResponseDays,
+  tags: profile.tags,
+}));
+
+const additionalClientContacts: ClientContact[] = additionalClientProfiles.map((profile) => ({
+  id: `contact-${profile.slug}-primary`,
+  clientId: `client-${profile.slug}`,
+  name: profile.displayName,
+  relationship: "Taxpayer",
+  email: profile.email,
+  phone: profile.phone,
+}));
+
+const additionalHouseholdMembers: TaxHouseholdMember[] = additionalClientProfiles.flatMap((profile) =>
+  profile.household.map((member, index) => ({
+    id: `hh-${profile.slug}-${index + 1}`,
+    clientId: `client-${profile.slug}`,
+    name: member.name,
+    relationship: member.relationship,
+    residencyPeriods: [{ jurisdiction: "US", startDate: "2024-01-01", endDate: null, sourceIds: [] }],
+    supportFacts: [],
+    studentStatus: member.studentStatus ?? null,
+  })),
+);
+
+const additionalEngagements: Engagement[] = additionalClientProfiles.map((profile) => ({
+  id: `eng-${profile.slug}-2024`,
+  firmId: IDS.firm,
+  clientId: `client-${profile.slug}`,
+  name: profile.engagementName,
+  taxYear: 2024,
+  status: "OPEN",
+  scopes: profile.scopes.map((scopeType) => ({
+    id: `scope-${profile.slug}-${scopeType.toLowerCase().replaceAll("_", "-")}`,
+    engagementId: `eng-${profile.slug}-2024`,
+    scopeType,
+    supportLevel: scopeType === "1040" ? "SUPPORTED" : "PARTIAL",
+  })),
+}));
+
+const additionalTaxReturns: TaxReturn[] = additionalClientProfiles.map((profile) => ({
+  id: `return-${profile.slug}-2024`,
+  firmId: IDS.firm,
+  clientId: `client-${profile.slug}`,
+  engagementId: `eng-${profile.slug}-2024`,
+  taxYear: 2024,
+  returnType: profile.returnType,
+  jurisdiction: "US",
+  status: profile.status,
+  readinessScore: profile.readinessScore,
+  extensionRiskScore: profile.extensionRiskScore,
+  riskLevel: profile.riskLevel,
+  assignedPreparerId: profile.preparerId,
+  assignedReviewerId: profile.reviewerId,
+  knowledgeSnapshotId: IDS.knowledgeSnapshot,
+  rulePackageId: IDS.rulePackage,
+  createdAt: "2026-02-18T15:00:00.000Z",
+  updatedAt: NOW,
+}));
+
+const additionalSourceDocuments: SourceDocument[] = additionalClientProfiles.flatMap((profile) =>
+  profile.documents.map((document) => ({
+    id: `doc-${profile.slug}-${document.id}`,
+    firmId: IDS.firm,
+    clientId: `client-${profile.slug}`,
+    taxReturnId: `return-${profile.slug}-2024`,
+    fileName: document.fileName,
+    documentClass: document.documentClass,
+    taxYear: 2024,
+    sourceType: "SOURCE_DOCUMENT",
+    uploadedBy: "CLIENT",
+    receivedAt: "2026-03-01T16:00:00.000Z",
+    processedAt: document.processed ? NOW : null,
+    duplicateOfDocumentId: null,
+    storageKey: `mock://documents/${profile.slug}/${document.id}`,
+    suspiciousText: null,
+    fixtureFields: [{ label: "Seeded document summary", value: document.fileName, confidence: 0.9 }],
+  })),
+);
+
+const additionalMissingDocuments: MissingDocument[] = additionalClientProfiles.flatMap((profile) =>
+  profile.missingDocuments.map((document) => ({
+    id: `missing-${profile.slug}-${document.id}`,
+    clientId: `client-${profile.slug}`,
+    taxReturnId: `return-${profile.slug}-2024`,
+    expectedDocumentClass: document.expectedDocumentClass,
+    reason: document.reason,
+    sourceIds: [],
+    severity: document.severity,
+    status: document.status ?? "MISSING",
+  })),
+);
+
+const additionalTaxIssues: TaxIssue[] = additionalClientProfiles.flatMap((profile) =>
+  profile.issues.map((issue) => ({
+    id: `issue-${profile.slug}-${issue.id}`,
+    firmId: IDS.firm,
+    clientId: `client-${profile.slug}`,
+    taxReturnId: `return-${profile.slug}-2024`,
+    issueType: issue.issueType,
+    title: issue.title,
+    description: issue.description,
+    riskLevel: issue.riskLevel,
+    status: issue.status ?? "OPEN",
+    blocker: issue.blocker,
+    sourceIds: [],
+    recommendedAction: issue.recommendedAction,
+    assignedToRole: issue.blocker ? "MANAGER_REVIEWER" : "PREPARER",
+    createdAt: NOW,
+    resolvedAt: null,
+  })),
+);
+
+const additionalTaxFlags: TaxFlag[] = additionalClientProfiles.flatMap((profile) =>
+  profile.flags.map((flag) => ({
+    id: `flag-${profile.slug}-${flag.id}`,
+    taxReturnId: `return-${profile.slug}-2024`,
+    riskLevel: flag.riskLevel,
+    label: flag.label,
+    reason: flag.reason,
+    sourceIds: [],
+  })),
+);
+
+const additionalClientClarifications: ClientClarification[] = additionalClientProfiles.flatMap((profile) =>
+  profile.issues.map((issue) => ({
+    id: `clar-${profile.slug}-${issue.id}`,
+    clientId: `client-${profile.slug}`,
+    taxReturnId: `return-${profile.slug}-2024`,
+    relatedIssueId: `issue-${profile.slug}-${issue.id}`,
+    question: issue.recommendedAction,
+    generatedByAiRunId: null,
+    status: issue.blocker ? "AWAITING_CLIENT" : "APPROVED_TO_SEND",
+    answer: null,
+    answeredAt: null,
+    reviewerApproved: !issue.blocker,
+    evidenceRefs: [],
+  })),
+);
+
+const additionalDeductionOpportunities: DeductionOpportunity[] = additionalClientProfiles.flatMap((profile) => {
+  const opportunities: DeductionOpportunity[] = [];
+  if (profile.tags.includes("childcare")) {
+    opportunities.push({
+      id: `opp-${profile.slug}-dependent-care`,
+      clientId: `client-${profile.slug}`,
+      taxReturnId: `return-${profile.slug}-2024`,
+      opportunityType: "EDUCATION_CREDIT",
+      title: "Possible dependent care credit support needed",
+      whyDetected: "Client organizer mentions childcare and dependent household facts.",
+      sourceIds: [],
+      missingFacts: ["Provider name", "Provider EIN", "Amount paid", "Care purpose/work connection"],
+      missingDocuments: ["UNKNOWN"],
+      riskLevel: "YELLOW",
+      status: "NEEDS_FACTS",
+      clientQuestion: "Please provide dependent care provider details, EIN, amount paid, and payment support.",
+      reviewerAction: "Review eligibility after provider facts are received.",
+    });
+  }
+  if (profile.tags.includes("education credit")) {
+    opportunities.push({
+      id: `opp-${profile.slug}-education-credit`,
+      clientId: `client-${profile.slug}`,
+      taxReturnId: `return-${profile.slug}-2024`,
+      opportunityType: "EDUCATION_CREDIT",
+      title: "Possible education credit",
+      whyDetected: "Full-time student dependent appears in household facts.",
+      sourceIds: [],
+      missingFacts: ["Qualified expenses", "Enrollment status", "Scholarships/grants"],
+      missingDocuments: ["UNKNOWN"],
+      riskLevel: "YELLOW",
+      status: "NEEDS_DOCUMENTS",
+      clientQuestion: "Please upload Form 1098-T or school account statement for the student dependent.",
+      reviewerAction: "Evaluate credit only after tuition support and scholarship facts are available.",
+    });
+  }
+  if (profile.tags.includes("advisory")) {
+    opportunities.push({
+      id: `opp-${profile.slug}-planning`,
+      clientId: `client-${profile.slug}`,
+      taxReturnId: `return-${profile.slug}-2024`,
+      opportunityType: "BOOKKEEPING_CLEANUP",
+      title: "Bookkeeping cleanup and unsupported crypto scope",
+      whyDetected: "Client mentioned crypto disposals without exchange exports or tax-lot detail.",
+      sourceIds: [],
+      missingFacts: ["Exchange list", "Tax-lot report", "Acquisition dates", "Disposition proceeds"],
+      missingDocuments: ["UNKNOWN"],
+      riskLevel: "RED",
+      status: "NEEDS_DOCUMENTS",
+      clientQuestion: "Please upload exchange exports or a tax-lot report before the firm evaluates crypto sales.",
+      reviewerAction: "Escalate unsupported scope and consider change-order/advisory workflow.",
+    });
+  }
+  return opportunities;
+});
+
 export const docketSeedData: DocketData = {
   firms: [
     {
@@ -211,6 +755,7 @@ export const docketSeedData: DocketData = {
       averageResponseDays: 5.8,
       tags: ["Schedule C", "slow responder", "prior extension", "brokerage"],
     },
+    ...additionalClients,
   ],
   clientContacts: [
     {
@@ -221,6 +766,7 @@ export const docketSeedData: DocketData = {
       email: "miguel.sandoval@example.com",
       phone: "555-0199",
     },
+    ...additionalClientContacts,
   ],
   householdMembers: [
     {
@@ -245,6 +791,7 @@ export const docketSeedData: DocketData = {
       supportFacts: [],
       studentStatus: null,
     },
+    ...additionalHouseholdMembers,
   ],
   engagements: [
     {
@@ -265,6 +812,7 @@ export const docketSeedData: DocketData = {
         },
       ],
     },
+    ...additionalEngagements,
   ],
   taxReturns: [
     {
@@ -286,6 +834,7 @@ export const docketSeedData: DocketData = {
       createdAt: "2026-02-14T16:00:00.000Z",
       updatedAt: NOW,
     },
+    ...additionalTaxReturns,
   ],
   sourceDocuments: [
     {
@@ -498,6 +1047,7 @@ export const docketSeedData: DocketData = {
       suspiciousText: null,
       fixtureFields: [],
     },
+    ...additionalSourceDocuments,
   ],
   documentExtractions: [
     { id: "extract-doc-acme-w2", sourceDocumentId: "doc-acme-w2", provider: "fixture", status: "COMPLETE", confidence: 0.98, createdAt: NOW },
@@ -731,6 +1281,7 @@ export const docketSeedData: DocketData = {
       severity: "RED",
       status: "REQUESTED",
     },
+    ...additionalMissingDocuments,
   ],
   contradictions: [
     {
@@ -777,6 +1328,7 @@ export const docketSeedData: DocketData = {
       clientQuestion: "Please upload the full-year mileage log showing date, destination, mileage, and business purpose for each trip.",
       reviewerAction: "Review substantiation before accepting any mileage deduction.",
     },
+    ...additionalDeductionOpportunities,
   ],
   taxIssues: [
     {
@@ -882,6 +1434,7 @@ export const docketSeedData: DocketData = {
       createdAt: NOW,
       resolvedAt: null,
     },
+    ...additionalTaxIssues,
   ],
   taxFlags: [
     {
@@ -908,6 +1461,7 @@ export const docketSeedData: DocketData = {
       reason: "Missing brokerage statement, red flags, slow response, and unresolved state issue.",
       sourceIds: ["issue-missing-1099-b", "issue-income-mismatch"],
     },
+    ...additionalTaxFlags,
   ],
   clientClarifications: [
     {
@@ -976,6 +1530,7 @@ export const docketSeedData: DocketData = {
       reviewerApproved: true,
       evidenceRefs: [],
     },
+    ...additionalClientClarifications,
   ],
   reviewerNotes: [
     {

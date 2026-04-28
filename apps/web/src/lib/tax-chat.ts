@@ -1,5 +1,5 @@
 import { synthesizeTaxChatWithClaude } from "@docket/ai";
-import { getReturnWorkbench } from "@docket/domain";
+import { getReturnWorkbench, readDocketData } from "@docket/domain";
 import { retrieveOfficialAuthority } from "@docket/tax-knowledge";
 
 import {
@@ -43,28 +43,44 @@ function findIssue(output: ReasoningOutputView | null, issueId: string) {
   return output?.issueSummaries.find((issue) => issue.issueId === issueId) ?? null;
 }
 
-function mentionsMiguel(text: string): boolean {
-  return /\bmiguel\b|\bsandoval\b/i.test(text);
-}
-
-function isFollowupIntoClientContext(question: string, history: ChatHistoryTurn[]): boolean {
-  const q = question.toLowerCase();
-  const recentHistory = history.slice(-6).map((turn) => turn.content).join("\n");
-  if (!mentionsMiguel(recentHistory)) return false;
-  return /\bhis\b|\bhe\b|\bclient\b|\breturn\b|\bfile\b|\bthat\b|\bthis\b|\bsource\b|\bevidence\b|\bwhy\b|\bhow\b|\bwhat\b|\bshow\b|\bdraft\b|\bquestion\b|\bissue\b|\bblocker\b|\bready\b|\bextension\b|\bincome\b|\bmileage\b|\bstock\b|\b1099\b|\bhome office\b|\bca\b|\btx\b/.test(q);
-}
-
-function isClientContextQuestion(question: string, explicitReturnId?: string, history: ChatHistoryTurn[] = []): boolean {
-  return Boolean(explicitReturnId) || mentionsMiguel(question) || isFollowupIntoClientContext(question, history);
-}
-
-function isBareClientLookup(question: string): boolean {
-  const normalized = question
+function normalizeForMatch(text: string): string {
+  return text
     .trim()
     .toLowerCase()
     .replace(/[?.!]+$/g, "")
     .replace(/\s+/g, " ");
-  return /^(miguel|miguel sandoval|sandoval|client miguel|open miguel|find miguel|show miguel)$/.test(normalized);
+}
+
+function resolveReturnIdFromText(question: string, history: ChatHistoryTurn[] = []): string | null {
+  const data = readDocketData();
+  const text = normalizeForMatch([question, ...history.slice(-6).map((turn) => turn.content)].join(" "));
+  const matches = data.clients
+    .map((client) => {
+      const parts = normalizeForMatch(client.displayName).split(" ").filter((part) => part.length > 2);
+      const score = parts.reduce((total, part) => total + (new RegExp(`\\b${part}\\b`).test(text) ? 1 : 0), 0);
+      return { client, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+  const client = matches[0]?.client;
+  if (!client) return null;
+  return data.taxReturns.find((taxReturn) => taxReturn.clientId === client.id)?.id ?? null;
+}
+
+function resolveWorkbench(question: string, explicitReturnId?: string, history: ChatHistoryTurn[] = []): WorkbenchView | null {
+  const returnId = explicitReturnId ?? resolveReturnIdFromText(question, history);
+  return returnId ? getReturnWorkbench(returnId) ?? null : null;
+}
+
+function isBareClientLookup(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  const data = readDocketData();
+  return data.clients.some((client) => {
+    const name = normalizeForMatch(client.displayName);
+    const first = name.split(" ")[0];
+    const last = name.split(" ").at(-1);
+    return normalized === name || normalized === first || normalized === last || normalized === `client ${first}` || normalized === `open ${first}` || normalized === `find ${first}` || normalized === `show ${first}`;
+  });
 }
 
 function isDeepMemoRequest(question: string): boolean {
@@ -312,6 +328,7 @@ function buildClientDeepDiveAnswer(workbench: WorkbenchView | null, output: Reas
   const citedIssueIds = output?.issueSummaries.flatMap((issue) => [...issue.sourceIds, ...issue.citationIds]) ?? [];
   const analyses = professionalAnalysesForAnswer(workbench, output);
   const activeAnalyses = analyses.filter((analysis) => !analysis.statusLabel.toLowerCase().startsWith("resolved"));
+  const analysisQueue = activeAnalyses.length > 0 ? activeAnalyses : analyses;
   const readyToFileGate = workbench?.readyToFileGate;
   const filingBlocked = readyToFileGate ? !readyToFileGate.pass : true;
   const gateBlockers = readyToFileGate?.blockers ?? [];
@@ -320,6 +337,11 @@ function buildClientDeepDiveAnswer(workbench: WorkbenchView | null, output: Reas
     : `${clientName}'s return is clear in the current Docket state.`;
   const readinessMeaning = "Readiness is workflow/data completeness, not permission to file. The ready-to-file gate is the clearance verdict.";
   const extensionReasons = workbench?.extension.reasons.length ? workbench.extension.reasons.join("; ") : "No extension drivers currently flagged.";
+  const contextMarkers = workbench?.client?.tags.length ? workbench.client.tags.join(", ") : "No client tags are recorded.";
+  const activeIssueTitles = activeIssues.length ? activeIssues.map((issue) => issue.title).join("; ") : "No active issues are open.";
+  const missingDocumentNames = missingDocuments.length
+    ? missingDocuments.map((document) => document.expectedDocumentClass.replaceAll("_", " ")).join(", ")
+    : "No missing document signals are open.";
 
   return {
     mode: "client-return",
@@ -333,14 +355,14 @@ function buildClientDeepDiveAnswer(workbench: WorkbenchView | null, output: Reas
     },
     answer: [
       `${clientName} is in ${taxReturn?.status.replaceAll("_", " ").toLowerCase() ?? "an active"} status for tax year ${taxReturn?.taxYear ?? "the selected tax year"} ${taxReturn?.returnType ?? "return"}. Readiness is ${workbench?.readiness.readinessScore ?? 0}% and extension risk is ${workbench?.extension.extensionRiskScore ?? 0}%. ${readinessMeaning}`,
-      "The main story is a self-employed client with Schedule C activity, prior-year extension history, slow response behavior, a CA-to-TX move, possible home office and mileage deductions, and a missing brokerage document after a stock-sale mention.",
+      `The main story is built from this client's own context markers: ${contextMarkers}. Active issues: ${activeIssueTitles}. Missing documents: ${missingDocumentNames}.`,
       filingBlocked
         ? `Ready-to-file gate blockers: ${gateBlockers.length > 0 ? gateBlockers.join("; ") : "none listed"}. Active tax issue blockers: ${blockerIssues.length}. Missing document signals: ${missingDocuments.length}. Unanswered clarifications: ${unansweredQuestions.length}. Material facts needing reviewer approval: ${unapprovedFacts.length}. Extension drivers: ${extensionReasons}.`
         : `Current persisted state has no ready-to-file gate blockers. Historical issue cards below are retained as the defensive review record, not active blockers.`,
     ],
     actionQueues: {
-      clientFacing: (activeAnalyses.length > 0 ? activeAnalyses : analyses).map((analysis) => analysis.clientCommunicationDraft).slice(0, 4),
-      preparerFacing: Array.from(new Set((activeAnalyses.length > 0 ? activeAnalyses : analyses).flatMap((analysis) => analysis.preparerWorkPlan))).slice(0, 8),
+      clientFacing: analysisQueue.map((analysis) => analysis.clientCommunicationDraft).slice(0, 4),
+      preparerFacing: Array.from(new Set(analysisQueue.flatMap((analysis) => analysis.preparerWorkPlan))).slice(0, 8),
     },
     reasoningSummary: [
       "I used the return workbench state because the prompt asks about a client return.",
@@ -348,11 +370,8 @@ function buildClientDeepDiveAnswer(workbench: WorkbenchView | null, output: Reas
       "Each issue below has its own rule space, smell tests, dollar exposure, client draft, preparer work plan, and issue-specific sources.",
     ],
     nextSteps: [
-      "Resolve the Schedule C income mismatch by confirming whether Stripe 1099-K payments overlap with Bluepeak 1099-NEC payments.",
-      "Request the 2024 consolidated brokerage 1099 or transaction statement for the Tesla stock sale.",
-      "Confirm the exact CA-to-TX move date and whether any California work continued after the move.",
-      "Do not claim home office or mileage until the missing substantiation facts are answered and reviewed.",
-      "Prepare an extension workflow unless the missing 1099-B, red flags, and review approvals are resolved quickly.",
+      ...analysisQueue.flatMap((analysis) => analysis.reviewerChecklist.slice(0, 1)).slice(0, 4),
+      filingBlocked ? "Keep ready-to-file blocked until the listed review gates pass." : "Retain the source-backed clearance record for reviewer signoff.",
     ],
     professionalAnalyses: analyses,
     sourceIds: [
@@ -394,11 +413,11 @@ function buildClientLookupAnswer(workbench: WorkbenchView | null): ChatAnswer {
     sourceIds: [],
     citationIds: [],
     suggestedFollowups: [
-      "Give me Miguel's status summary.",
-      "Show Miguel's filing blockers.",
-      "What documents are missing for Miguel?",
-      "Draft Miguel's client questions.",
-      "Run the full reviewer memo for Miguel.",
+      `Give me ${clientName}'s status summary.`,
+      `Show ${clientName}'s filing blockers.`,
+      `What documents are missing for ${clientName}?`,
+      `Draft ${clientName}'s client questions.`,
+      `Run the full reviewer memo for ${clientName}.`,
     ],
   };
 }
@@ -446,10 +465,10 @@ function buildClientStatusAnswer(workbench: WorkbenchView | null): ChatAnswer {
     ],
     citationIds: [],
     suggestedFollowups: [
-      "Show Miguel's filing blockers.",
-      "What documents are missing for Miguel?",
-      "Show the evidence for Miguel's income mismatch.",
-      "Run the full reviewer memo for Miguel.",
+      `Show ${clientName}'s filing blockers.`,
+      `What documents are missing for ${clientName}?`,
+      `Show the evidence for ${clientName}'s top issue.`,
+      `Run the full reviewer memo for ${clientName}.`,
     ],
   };
 }
@@ -707,9 +726,8 @@ function maybeSynthesizeWithClaude(
 }
 
 export async function buildTaxChatResponse(question: string, returnId?: string, conversationHistory: ChatHistoryTurn[] = []): Promise<TaxChatResponse> {
-  const hasClientContext = isClientContextQuestion(question, returnId, conversationHistory);
-  const selectedReturnId = hasClientContext ? returnId ?? "return-miguel-2024" : "";
-  const workbench = hasClientContext ? getReturnWorkbench(selectedReturnId) ?? null : null;
+  const workbench = resolveWorkbench(question, returnId, conversationHistory);
+  const hasClientContext = Boolean(workbench);
   const output = asReasoningOutputView(workbench?.latestAIReasoningRun?.output);
   const sourceIndex = workbench?.reasoningSourceIndex ?? {};
   const draftAnswer = await buildGroundedAnswer(question, output, hasClientContext, workbench);
