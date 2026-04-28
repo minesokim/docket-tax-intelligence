@@ -84,8 +84,13 @@ pre {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 272px minmax(0, 1fr);
+  grid-template-columns: 220px minmax(0, 1fr);
   min-height: 100vh;
+  transition: grid-template-columns 0.2s ease;
+}
+
+.app-shell-collapsed {
+  grid-template-columns: 72px minmax(0, 1fr);
 }
 
 .sidebar {
@@ -94,28 +99,41 @@ pre {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  padding: 20px;
+  padding: 16px 14px;
   border-right: 1px solid var(--line);
   background: #102018;
   color: #f4fbf6;
 }
 
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 24px;
+  min-width: 0;
+  gap: 10px;
+  flex: 1;
 }
 
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  border-radius: 10px;
   background: #f7c948;
   color: #102018;
   font-weight: 800;
+}
+
+.brand-copy {
+  min-width: 0;
 }
 
 .brand strong,
@@ -123,30 +141,113 @@ pre {
   display: block;
 }
 
+.brand strong {
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
 .brand small {
   color: #b6c7be;
-  font-size: 12px;
+  font-size: 11px;
+}
+
+.sidebar-toggle {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dbe8de;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.sidebar-toggle:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .side-nav {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .side-nav a {
-  padding: 10px 12px;
-  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border-radius: 10px;
   color: #e7f0ea;
+  font-size: 14px;
 }
 
-.side-nav a:hover {
+.side-nav-short {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #b6c7be;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.side-nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-nav a:hover,
+.side-nav a.active {
   background: rgba(255, 255, 255, 0.08);
+}
+
+.side-nav a.active .side-nav-short {
+  border-color: rgba(247, 201, 72, 0.35);
+  background: rgba(247, 201, 72, 0.12);
+  color: #f7c948;
 }
 
 .sidebar-status {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   margin-top: auto;
+}
+
+.app-shell-collapsed .sidebar {
+  align-items: center;
+  padding-inline: 12px;
+}
+
+.app-shell-collapsed .sidebar-header {
+  display: grid;
+  justify-items: center;
+  width: 100%;
+}
+
+.app-shell-collapsed .brand {
+  justify-content: center;
+}
+
+.app-shell-collapsed .brand-copy,
+.app-shell-collapsed .side-nav-label,
+.app-shell-collapsed .sidebar-status {
+  display: none;
+}
+
+.app-shell-collapsed .side-nav a {
+  justify-content: center;
+  width: 48px;
+  padding: 8px;
 }
 
 .main-shell {
@@ -610,13 +711,18 @@ main {
 
 .taxgpt-shell {
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: 236px minmax(0, 1fr);
   min-height: calc(100vh - 112px);
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  box-shadow: var(--shadow);
+  border-radius: 14px;
+  background: #f7f8f4;
+  box-shadow: 0 24px 70px rgba(20, 34, 27, 0.11);
+  transition: grid-template-columns 0.2s ease;
+}
+
+.taxgpt-shell-collapsed {
+  grid-template-columns: 58px minmax(0, 1fr);
 }
 
 .taxgpt-history {
@@ -624,7 +730,7 @@ main {
   grid-template-rows: auto auto 1fr;
   min-height: 0;
   border-right: 1px solid var(--line);
-  background: #14221b;
+  background: #112019;
   color: #edf6ef;
 }
 
@@ -632,13 +738,41 @@ main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 18px;
+  gap: 8px;
+  min-height: 62px;
+  padding: 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.taxgpt-history-header > strong {
+  min-width: 0;
+  color: #f7fbf5;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.taxgpt-rail-toggle {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #dbe8de;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.taxgpt-rail-toggle:hover,
+.taxgpt-rail-icons button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 .taxgpt-search {
-  padding: 14px;
+  padding: 12px 14px;
 }
 
 .taxgpt-search input,
@@ -652,8 +786,9 @@ main {
 }
 
 .taxgpt-search input {
-  min-height: 38px;
-  padding: 0 12px;
+  min-height: 36px;
+  padding: 0 11px;
+  font-size: 13px;
 }
 
 .taxgpt-history-list {
@@ -661,15 +796,35 @@ main {
   align-content: start;
   gap: 4px;
   overflow: auto;
-  padding: 0 10px 18px;
+  padding: 0 12px 18px;
 }
 
 .taxgpt-history-list a {
   border-radius: 8px;
-  padding: 11px 12px;
+  padding: 9px 10px;
   color: #dbe8de;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.35;
+}
+
+.taxgpt-rail-icons {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 14px 8px;
+}
+
+.taxgpt-rail-icons button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #dbe8de;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .taxgpt-history-list a:hover {
@@ -700,7 +855,8 @@ main {
 .thread-history strong {
   padding: 0 4px 4px;
   color: #9db3a6;
-  font-size: 12px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -712,8 +868,9 @@ main {
   background: transparent;
   color: #dbe8de;
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.35;
+  padding: 8px 10px;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -728,7 +885,7 @@ main {
   grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   min-width: 0;
   min-height: 0;
-  background: #fbfcfa;
+  background: #f7f8f4;
 }
 
 .taxgpt-topbar {
@@ -736,26 +893,30 @@ main {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 20px 22px;
+  min-height: 76px;
+  padding: 14px 22px;
   border-bottom: 1px solid var(--line);
+  background: rgba(251, 252, 250, 0.88);
+  backdrop-filter: blur(12px);
 }
 
 .taxgpt-topbar h1 {
-  font-size: 28px;
+  margin-top: 4px;
+  font-size: 24px;
   line-height: 1;
 }
 
 .chat-thread {
   display: grid;
   align-content: start;
-  gap: 20px;
+  gap: 18px;
   overflow: auto;
-  padding: 24px;
+  padding: 24px 28px 28px;
 }
 
 .chat-message {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 38px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
 }
@@ -763,13 +924,15 @@ main {
 .chat-avatar {
   display: grid;
   place-items: center;
-  width: 40px;
-  min-height: 40px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  border-radius: 10px;
   background: var(--ink);
   color: white;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
+  align-self: start;
 }
 
 .assistant-message .chat-avatar {
@@ -780,9 +943,9 @@ main {
   display: grid;
   gap: 14px;
   max-width: 980px;
-  padding: 18px;
+  padding: 16px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: white;
 }
 
@@ -834,7 +997,7 @@ main {
 }
 
 .memo-message {
-  align-items: stretch;
+  align-items: start;
 }
 
 .memo-workspace {
@@ -844,8 +1007,9 @@ main {
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 12px;
   background: white;
+  box-shadow: 0 18px 45px rgba(20, 34, 27, 0.08);
 }
 
 .memo-document {
@@ -1286,10 +1450,17 @@ main {
 
 .suggestion-panel {
   display: grid;
-  gap: 10px;
-  padding: 14px 22px;
+  gap: 8px;
+  padding: 12px 22px;
   border-top: 1px solid var(--line);
-  background: white;
+  background: rgba(251, 252, 250, 0.92);
+}
+
+.suggestion-panel > strong {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .suggestion-row {
@@ -1303,24 +1474,24 @@ main {
 }
 
 .suggestion-chip {
-  min-height: 32px;
+  min-height: 30px;
   border-radius: 999px;
-  background: #f8faf8;
+  background: white;
   color: var(--ink);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .taxgpt-composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
-  padding: 14px 22px 8px;
+  padding: 12px 22px 8px;
   border-top: 1px solid var(--line);
-  background: #fbfcfa;
+  background: rgba(251, 252, 250, 0.92);
 }
 
 .taxgpt-composer textarea {
-  min-height: 58px;
+  min-height: 52px;
   resize: vertical;
   padding: 12px;
 }
@@ -1332,6 +1503,7 @@ main {
 
 .taxgpt-disclaimer {
   padding: 0 22px 18px;
+  background: rgba(251, 252, 250, 0.92);
   font-size: 12px;
 }
 

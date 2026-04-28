@@ -1,5 +1,8 @@
+"use client";
+
 import Link from "next/link";
-import type React from "react";
+import { usePathname } from "next/navigation";
+import { useState, type ReactNode } from "react";
 
 import type {
   AuditEvent,
@@ -14,33 +17,47 @@ import type {
 } from "@docket/domain";
 
 const navItems = [
-  { href: "/dashboard/command-center", label: "Command Center" },
-  { href: "/dashboard/clients", label: "Clients" },
-  { href: "/dashboard/returns", label: "Returns" },
-  { href: "/dashboard/ai", label: "AI" },
-  { href: "/dashboard/documents", label: "Documents" },
-  { href: "/dashboard/conversations", label: "Conversations" },
-  { href: "/dashboard/knowledge", label: "Knowledge" },
-  { href: "/dashboard/evals", label: "Evals" },
-  { href: "/dashboard/settings", label: "Settings" },
-  { href: "/portal", label: "Client Portal" },
+  { href: "/dashboard/command-center", label: "Command Center", short: "C" },
+  { href: "/dashboard/clients", label: "Clients", short: "CL" },
+  { href: "/dashboard/returns", label: "Returns", short: "R" },
+  { href: "/dashboard/ai", label: "AI", short: "AI" },
+  { href: "/dashboard/documents", label: "Documents", short: "D" },
+  { href: "/dashboard/conversations", label: "Conversations", short: "CV" },
+  { href: "/dashboard/knowledge", label: "Knowledge", short: "K" },
+  { href: "/dashboard/evals", label: "Evals", short: "E" },
+  { href: "/dashboard/settings", label: "Settings", short: "S" },
+  { href: "/portal", label: "Client Portal", short: "P" },
 ];
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({ children }: { children: ReactNode }) {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const pathname = usePathname();
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${sidebarOpen ? "" : "app-shell-collapsed"}`}>
       <aside className="sidebar">
-        <Link className="brand" href="/dashboard/command-center">
-          <span className="brand-mark">D</span>
-          <span>
-            <strong>Docket</strong>
-            <small>Tax intelligence</small>
-          </span>
-        </Link>
+        <div className="sidebar-header">
+          <Link className="brand" href="/dashboard/command-center">
+            <span className="brand-mark">D</span>
+            <span className="brand-copy">
+              <strong>Docket</strong>
+              <small>Tax intelligence</small>
+            </span>
+          </Link>
+          <button
+            aria-label={sidebarOpen ? "Collapse primary sidebar" : "Expand primary sidebar"}
+            className="sidebar-toggle"
+            onClick={() => setSidebarOpen((open) => !open)}
+            type="button"
+          >
+            {sidebarOpen ? "<" : ">"}
+          </button>
+        </div>
         <nav className="side-nav" aria-label="Primary">
           {navItems.map((item) => (
-            <Link href={item.href} key={item.href}>
-              {item.label}
+            <Link className={pathname === item.href || pathname.startsWith(`${item.href}/`) ? "active" : ""} href={item.href} key={item.href} title={item.label}>
+              <span className="side-nav-short">{item.short}</span>
+              <span className="side-nav-label">{item.label}</span>
             </Link>
           ))}
         </nav>
@@ -73,7 +90,7 @@ export function PageHeader({
   eyebrow?: string;
   title: string;
   description?: string;
-  actions?: React.ReactNode;
+  actions?: ReactNode;
 }) {
   return (
     <section className="page-header">
@@ -95,8 +112,8 @@ export function Section({
 }: {
   title: string;
   description?: string;
-  children: React.ReactNode;
-  action?: React.ReactNode;
+  children: ReactNode;
+  action?: ReactNode;
 }) {
   return (
     <section className="section">

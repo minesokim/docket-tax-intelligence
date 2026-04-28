@@ -442,6 +442,7 @@ export function TaxChatClient({ initialQuestion, initialReturnId }: { initialQue
   const [input, setInput] = useState(initialQuestion);
   const [returnId, setReturnId] = useState(initialReturnId);
   const [pending, setPending] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [lastAssistantId, setLastAssistantId] = useState<string | null>(null);
   const sentInitial = useRef(false);
 
@@ -490,35 +491,53 @@ export function TaxChatClient({ initialQuestion, initialReturnId }: { initialQue
   }, [initialQuestion, initialReturnId]);
 
   return (
-    <div className="taxgpt-shell">
+    <div className={`taxgpt-shell ${sidebarOpen ? "" : "taxgpt-shell-collapsed"}`}>
       <aside className="taxgpt-history">
         <div className="taxgpt-history-header">
-          <strong>Docket AI</strong>
-          <StatusBadge label="Research" tone="blue" />
+          <strong>{sidebarOpen ? "Docket AI" : "D"}</strong>
+          {sidebarOpen ? <StatusBadge label="Research" tone="blue" /> : null}
+          <button
+            aria-label={sidebarOpen ? "Collapse conversation rail" : "Expand conversation rail"}
+            className="taxgpt-rail-toggle"
+            onClick={() => setSidebarOpen((open) => !open)}
+            type="button"
+          >
+            {sidebarOpen ? "<" : ">"}
+          </button>
         </div>
-        <div className="taxgpt-search">
-          <input placeholder="Search this thread..." />
-        </div>
-        <div className="taxgpt-history-list">
-          {messages.filter((message) => message.role === "user").length === 0 ? (
-            <div className="empty-history">
-              <strong>No chat history yet</strong>
-              <span>Start a new research thread or attach a client return.</span>
+        {sidebarOpen ? (
+          <>
+            <div className="taxgpt-search">
+              <input placeholder="Search this thread..." />
             </div>
-          ) : (
-            <div className="thread-history">
-              <strong>Current thread</strong>
-              {messages
-                .filter((message) => message.role === "user")
-                .slice(-8)
-                .map((message) => (
-                  <button key={message.id} type="button" title={message.content}>
-                    {message.content}
-                  </button>
-                ))}
+            <div className="taxgpt-history-list">
+              {messages.filter((message) => message.role === "user").length === 0 ? (
+                <div className="empty-history">
+                  <strong>No chat history yet</strong>
+                  <span>Start a new research thread or attach a client return.</span>
+                </div>
+              ) : (
+                <div className="thread-history">
+                  <strong>Current thread</strong>
+                  {messages
+                    .filter((message) => message.role === "user")
+                    .slice(-8)
+                    .map((message) => (
+                      <button key={message.id} type="button" title={message.content}>
+                        {message.content}
+                      </button>
+                    ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </>
+        ) : (
+          <div className="taxgpt-rail-icons" aria-label="Collapsed conversation shortcuts">
+            <button type="button" title="Current thread">Q</button>
+            <button type="button" title="Miguel return context">M</button>
+            <button type="button" title="Sources">S</button>
+          </div>
+        )}
       </aside>
 
       <section className="taxgpt-chat">
