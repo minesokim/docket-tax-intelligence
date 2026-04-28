@@ -43,9 +43,33 @@ function findIssue(output: ReasoningOutputView | null, issueId: string) {
   return output?.issueSummaries.find((issue) => issue.issueId === issueId) ?? null;
 }
 
+function mentionsMiguel(text: string): boolean {
+  return /\bmiguel\b|\bsandoval\b/i.test(text);
+}
+
+function isFollowupIntoClientContext(question: string, history: ChatHistoryTurn[]): boolean {
+  const q = question.toLowerCase();
+  const recentHistory = history.slice(-6).map((turn) => turn.content).join("\n");
+  if (!mentionsMiguel(recentHistory)) return false;
+  return /\bhis\b|\bhe\b|\bclient\b|\breturn\b|\bfile\b|\bthat\b|\bthis\b|\bsource\b|\bevidence\b|\bwhy\b|\bhow\b|\bwhat\b|\bshow\b|\bdraft\b|\bquestion\b|\bissue\b|\bblocker\b|\bready\b|\bextension\b|\bincome\b|\bmileage\b|\bstock\b|\b1099\b|\bhome office\b|\bca\b|\btx\b/.test(q);
+}
+
 function isClientContextQuestion(question: string, explicitReturnId?: string, history: ChatHistoryTurn[] = []): boolean {
-  const q = [question, ...history.slice(-6).map((turn) => turn.content)].join("\n").toLowerCase();
-  return Boolean(explicitReturnId) || /\bmiguel\b|\bsandoval\b|his return|client file|this return|this client|home office|1099-b|tesla|mileage|extension risk|ready to file|schedule c/.test(q);
+  return Boolean(explicitReturnId) || mentionsMiguel(question) || isFollowupIntoClientContext(question, history);
+}
+
+function isBareClientLookup(question: string): boolean {
+  const normalized = question
+    .trim()
+    .toLowerCase()
+    .replace(/[?.!]+$/g, "")
+    .replace(/\s+/g, " ");
+  return /^(miguel|miguel sandoval|sandoval|client miguel|open miguel|find miguel|show miguel)$/.test(normalized);
+}
+
+function isDeepMemoRequest(question: string): boolean {
+  const q = question.toLowerCase();
+  return /\bdeep dive\b|\bfull\b.*\bmemo\b|\breviewer memo\b|\bfull analysis\b|\bcomprehensive analysis\b|\bfull review\b|\brun\b.*\bmemo\b|\banalyze\b.*\breturn\b/.test(q);
 }
 
 function isCasualMessage(question: string): boolean {
@@ -348,6 +372,88 @@ function buildClientDeepDiveAnswer(workbench: WorkbenchView | null, output: Reas
   };
 }
 
+function buildClientLookupAnswer(workbench: WorkbenchView | null): ChatAnswer {
+  const clientName = workbench?.client?.displayName ?? "Miguel Sandoval";
+  const taxReturn = workbench?.taxReturn;
+  return {
+    mode: "client-return",
+    headline: `I found ${clientName}'s return file.`,
+    answer: [
+      `${clientName} has a ${taxReturn?.taxYear ?? 2024} ${taxReturn?.returnType ?? "Individual 1040 + Schedule C"} return in Docket.`,
+      "Tell me what you want to do with the file: status, blockers, documents, client questions, sources, reconciliation, or a full reviewer memo.",
+    ],
+    reasoningSummary: [
+      "I treated this as a client lookup, not a request for analysis.",
+      "No tax conclusion or filing-readiness conclusion was made from the word alone.",
+    ],
+    nextSteps: [
+      "Ask for a status summary if you want the short operational view.",
+      "Ask for blockers if you want filing-risk triage.",
+      "Ask for a deep dive or reviewer memo if you want the full citation-backed analysis.",
+    ],
+    sourceIds: [],
+    citationIds: [],
+    suggestedFollowups: [
+      "Give me Miguel's status summary.",
+      "Show Miguel's filing blockers.",
+      "What documents are missing for Miguel?",
+      "Draft Miguel's client questions.",
+      "Run the full reviewer memo for Miguel.",
+    ],
+  };
+}
+
+function buildClientStatusAnswer(workbench: WorkbenchView | null): ChatAnswer {
+  const clientName = workbench?.client?.displayName ?? "Miguel Sandoval";
+  const activeIssues = workbench?.issues.filter((issue) => issue.status !== "RESOLVED" && issue.status !== "WAIVED_BY_REVIEWER") ?? [];
+  const redIssues = activeIssues.filter((issue) => issue.riskLevel === "RED");
+  const blockerIssues = activeIssues.filter((issue) => issue.blocker);
+  const gateBlockers = workbench?.readyToFileGate.blockers ?? [];
+  const missingDocuments = workbench?.missingDocuments.filter((document) => document.status !== "RECEIVED") ?? [];
+  const extensionReasons = workbench?.extension.reasons.slice(0, 4) ?? [];
+
+  return {
+    mode: "client-return",
+    headline: `${clientName}: status summary, not a full memo.`,
+    verdict: {
+      filingStatus: gateBlockers.length > 0 ? "Not ready to file" : "Ready-to-file stub passed",
+      blockerCount: gateBlockers.length,
+      readinessScore: workbench?.readiness.readinessScore ?? 0,
+      extensionRiskScore: workbench?.extension.extensionRiskScore ?? 0,
+      readinessMeaning: "Readiness measures workflow completion. Filing clearance is controlled by review gates.",
+    },
+    answer: [
+      `${clientName}'s return is ${workbench?.taxReturn.status.replaceAll("_", " ").toLowerCase() ?? "active"} with ${workbench?.readiness.readinessScore ?? 0}% workflow readiness and ${workbench?.extension.extensionRiskScore ?? 0}% extension risk.`,
+      gateBlockers.length > 0
+        ? `The filing gate is blocked by: ${gateBlockers.join("; ")}.`
+        : "The current persisted ready-to-file gate has no listed blockers.",
+      `Current issue counts: ${redIssues.length} active red issue(s), ${blockerIssues.length} active issue blocker(s), ${missingDocuments.length} missing document signal(s).`,
+      extensionReasons.length > 0 ? `Extension risk drivers: ${extensionReasons.join("; ")}.` : "No extension drivers are currently listed.",
+    ],
+    reasoningSummary: [
+      "I treated the request as an operational status summary.",
+      "I did not run the full reviewer memo because the prompt did not ask for deep analysis.",
+      "The summary separates readiness percentage from ready-to-file clearance.",
+    ],
+    nextSteps: [
+      "Ask for filing blockers if you want the risk queue.",
+      "Ask for source evidence if you want citations for a specific issue.",
+      "Ask for the full reviewer memo when you want memo-grade analysis.",
+    ],
+    sourceIds: [
+      ...(workbench?.issues.flatMap((issue) => issue.sourceIds).slice(0, 8) ?? []),
+      ...(workbench?.missingDocuments.flatMap((document) => document.sourceIds).slice(0, 4) ?? []),
+    ],
+    citationIds: [],
+    suggestedFollowups: [
+      "Show Miguel's filing blockers.",
+      "What documents are missing for Miguel?",
+      "Show the evidence for Miguel's income mismatch.",
+      "Run the full reviewer memo for Miguel.",
+    ],
+  };
+}
+
 async function buildGroundedAnswer(question: string, output: ReasoningOutputView | null, hasClientContext: boolean, workbench: WorkbenchView | null): Promise<ChatAnswer> {
   const q = question.toLowerCase();
   const incomeIssue = findIssue(output, "issue-income-mismatch");
@@ -394,8 +500,16 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
     };
   }
 
-  if (q.includes("status") || q.includes("deep dive") || q.includes("in general") || q.includes("need to know") || q.includes("tell me about") || q.includes("overview") || q.includes("summary")) {
+  if (isBareClientLookup(question)) {
+    return buildClientLookupAnswer(workbench);
+  }
+
+  if (isDeepMemoRequest(question)) {
     return buildClientDeepDiveAnswer(workbench, output);
+  }
+
+  if (q.includes("status") || q.includes("in general") || q.includes("need to know") || q.includes("tell me about") || q.includes("overview") || q.includes("summary")) {
+    return buildClientStatusAnswer(workbench);
   }
 
   if (q.includes("block") || q.includes("ready") || q.includes("file") || q.includes("safely conclude")) {
@@ -510,7 +624,31 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
     };
   }
 
-  return buildClientDeepDiveAnswer(workbench, output);
+  return {
+    mode: "client-return",
+    headline: "I have Miguel's file open. What view do you want?",
+    answer: [
+      "I found the client context, but your request is not specific enough for me to run a reviewer memo or make a tax conclusion.",
+      "Choose a narrower path: status, filing blockers, missing documents, source evidence, client questions, reconciliation table, extension risk, or full deep dive.",
+    ],
+    reasoningSummary: [
+      "Client context is available, but vague prompts should not trigger a canned memo.",
+      "Docket should ask for scope before producing analysis that looks authoritative.",
+    ],
+    nextSteps: [
+      "Ask: 'Give me Miguel's status summary.'",
+      "Ask: 'Show Miguel's filing blockers.'",
+      "Ask: 'Run the full reviewer memo for Miguel.'",
+    ],
+    sourceIds: [],
+    citationIds: [],
+    suggestedFollowups: [
+      "Give me Miguel's status summary.",
+      "Show Miguel's filing blockers.",
+      "Show the evidence for Miguel's income mismatch.",
+      "Run the full reviewer memo for Miguel.",
+    ],
+  };
 }
 
 function buildSourcePacket(answer: ChatAnswer, sourceIndex: Record<string, SourceIndexEntry>) {
