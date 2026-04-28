@@ -43,8 +43,13 @@ describe("tax chat orchestrator artifacts", () => {
           sourceType: "missing_document",
           label: "FORM 1095 A",
         }),
+        expect.objectContaining({
+          sourceType: "tax_citation",
+          label: "Form 1095-A marketplace coverage",
+        }),
       ]),
     );
+    expect(response.answer.artifacts?.sourcePacket.map((packet) => packet.label)).not.toContain("Schedule C gross receipts");
   });
 
   it("does not emit a memo artifact for a bare client lookup", async () => {

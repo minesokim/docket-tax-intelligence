@@ -23,6 +23,9 @@ type OrchestratorInput = {
   returnId: string;
   history: ChatHistoryTurn[];
 };
+type ClientFile = NonNullable<ReturnType<typeof getClientFileTool>>;
+type OrchestratorWorkbench = ClientFile["workbench"];
+type OrchestratorIssue = OrchestratorWorkbench["issues"][number];
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -72,6 +75,7 @@ function localAuthorityPacketIds(sourcePacket: SourcePacketItem[], issueTitle: s
       }
       if (issueType.includes("MILEAGE") && haystack.includes("mileage")) score += 3;
       if (issueType.includes("HOME_OFFICE") && haystack.includes("home office")) score += 3;
+      if ((issueType.includes("1095") || query.includes("marketplace")) && (haystack.includes("1095") || haystack.includes("marketplace") || haystack.includes("premium tax credit"))) score += 3;
       if (issueType.includes("INCOME") || issueType.includes("1099")) {
         if (haystack.includes("schedule c") || haystack.includes("gross receipts")) score += 3;
       }
@@ -132,14 +136,54 @@ function buildReconciliationTables(returnId: string, issueIds: string[]): Reconc
   ];
 }
 
+function selectRelevantSourcePacket(
+  fullSourcePacket: SourcePacketItem[],
+  selectedIssues: OrchestratorIssue[],
+  workbench: OrchestratorWorkbench,
+  question: string,
+  intent: OrchestratorIntent,
+): SourcePacketItem[] {
+  const allowedSourceIds = new Set<string>();
+  const allowedPacketIds = new Set<string>();
+  const activeMissingDocuments = workbench.missingDocuments.filter((document) => document.status !== "RECEIVED" && document.status !== "WAIVED");
+  const selectedIssueText = selectedIssues.map((issue) => `${issue.title} ${issue.description} ${issue.issueType} ${issue.recommendedAction}`).join(" ").toLowerCase();
+
+  for (const issue of selectedIssues) {
+    allowedSourceIds.add(issue.id);
+    for (const sourceId of issue.sourceIds) allowedSourceIds.add(sourceId);
+    for (const packetId of localAuthorityPacketIds(fullSourcePacket, issue.title, issue.issueType)) allowedPacketIds.add(packetId);
+    for (const questionItem of workbench.questions.filter((item) => item.relatedIssueId === issue.id)) allowedSourceIds.add(questionItem.id);
+  }
+
+  for (const missingDocument of activeMissingDocuments) {
+    const docName = missingDocument.expectedDocumentClass.replaceAll("_", " ").toLowerCase();
+    const isRelevant = intent !== "client_lookup" || selectedIssueText.includes(docName) || question.toLowerCase().includes(docName);
+    if (isRelevant || selectedIssues.length > 0) {
+      allowedSourceIds.add(missingDocument.id);
+      for (const sourceId of missingDocument.sourceIds) allowedSourceIds.add(sourceId);
+    }
+  }
+
+  const selected = fullSourcePacket.filter((packet) => {
+    if (packet.sourceType === "client" || packet.sourceType === "review_gate") return true;
+    if (packet.sourceType === "tax_authority" || packet.sourceType === "tax_citation") return allowedPacketIds.has(packet.id);
+    if (allowedSourceIds.has(packet.sourceId)) return true;
+    if (intent === "client_lookup") return false;
+    return ["document", "tax_fact", "client_claim", "conversation", "prior_year_pattern", "workpaper"].includes(packet.sourceType);
+  });
+
+  return Array.from(new Map(selected.map((packet) => [packet.id, packet])).values());
+}
+
 export function runTaxChatOrchestrator(input: OrchestratorInput): ChatArtifactEnvelope {
   const clientFile = getClientFileTool(input.returnId);
   if (!clientFile) throw new Error(`No return found for orchestrator returnId ${input.returnId}`);
 
-  const { workbench, sourcePacket, factGraph } = clientFile;
+  const { workbench, sourcePacket: fullSourcePacket, factGraph } = clientFile;
   const intent = classifyIntent(input.question);
   const activeIssues = workbench.issues.filter((issue) => issue.status !== "RESOLVED" && issue.status !== "WAIVED_BY_REVIEWER");
   const selectedIssues = intent === "client_lookup" ? [] : activeIssues.slice(0, intent === "client_status" ? 2 : 6);
+  const sourcePacket = selectRelevantSourcePacket(fullSourcePacket, selectedIssues, workbench, input.question, intent);
   const traces: OrchestrationTraceEvent[] = [
     trace("intent", `Classified prompt as ${intent}.`, null, input.question),
     trace("context", `Loaded ${workbench.client?.displayName ?? "client"} return context.`, "getClientFile", input.returnId, sourcePacket.slice(0, 6).map((packet) => packet.id)),

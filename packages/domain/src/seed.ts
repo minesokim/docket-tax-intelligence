@@ -1627,12 +1627,25 @@ export const docketSeedData: DocketData = {
       effectiveDate: "2024-01-01",
       nonprecedential: false,
     },
+    {
+      id: "auth-irs-form-1095a-instructions",
+      jurisdiction: "US",
+      title: "IRS Form 1095-A and Premium Tax Credit instructions",
+      authorityLevel: "IRS_FORM_INSTRUCTION",
+      sourceUrl: "https://www.irs.gov/forms-pubs/about-form-1095-a",
+      topicTags: ["1095-a", "marketplace", "premium-tax-credit", "aca"],
+      retrievedAt: "2026-04-26T09:00:00.000Z",
+      publishedAt: "2025-01-15T00:00:00.000Z",
+      effectiveDate: "2024-01-01",
+      nonprecedential: false,
+    },
   ],
   taxAuthorityVersions: [
     { id: "authv-schedule-c-2024-a", sourceId: "auth-schedule-c-instructions", contentHash: "hash-schedule-c-2024-a", supersedesVersionId: null, createdAt: NOW },
     { id: "authv-pub463-2024-a", sourceId: "auth-irs-pub-463", contentHash: "hash-pub463-2024-a", supersedesVersionId: null, createdAt: NOW },
     { id: "authv-pub587-2024-a", sourceId: "auth-irs-pub-587", contentHash: "hash-pub587-2024-a", supersedesVersionId: null, createdAt: NOW },
     { id: "authv-pub1345-2024-a", sourceId: "auth-irs-pub-1345", contentHash: "hash-pub1345-2024-a", supersedesVersionId: null, createdAt: NOW },
+    { id: "authv-form1095a-2024-a", sourceId: "auth-irs-form-1095a-instructions", contentHash: "hash-form1095a-2024-a", supersedesVersionId: null, createdAt: NOW },
   ],
   taxCitations: [
     {
@@ -1655,6 +1668,13 @@ export const docketSeedData: DocketData = {
       label: "Home office exclusive use",
       quote: "The business part of your home must be used exclusively and regularly for your trade or business.",
       authorityLevel: "IRS_PUBLICATION",
+    },
+    {
+      id: "cite-form1095a-marketplace",
+      sourceId: "auth-irs-form-1095a-instructions",
+      label: "Form 1095-A marketplace coverage",
+      quote: "Form 1095-A supports reporting Health Insurance Marketplace coverage and premium tax credit reconciliation.",
+      authorityLevel: "IRS_FORM_INSTRUCTION",
     },
   ],
   taxSourceIngestionRuns: [
