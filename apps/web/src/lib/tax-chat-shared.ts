@@ -1,4 +1,5 @@
 import type { AuthorityResearchResult } from "@docket/tax-knowledge";
+import type { ChatArtifactEnvelope } from "@docket/domain";
 
 export type ChatHistoryTurn = {
   role: "user" | "assistant";
@@ -33,6 +34,7 @@ export type ChatAnswer = {
   citationIds: string[];
   suggestedFollowups: string[];
   retrievedAuthority?: AuthorityResearchResult;
+  artifacts?: ChatArtifactEnvelope;
   synthesizedBy?: "claude-code-cli";
   limitation?: string;
 };

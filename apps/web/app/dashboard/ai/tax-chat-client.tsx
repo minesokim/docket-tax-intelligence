@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { StatusBadge } from "../../../src/components/docket-ui";
 import { suggestedQuestions, type ChatAnswer, type ChatHistoryTurn, type SourceIndexEntry, type TaxChatResponse } from "../../../src/lib/tax-chat-shared";
+import type { ReconciliationTableArtifact } from "@docket/domain";
 
 type Message = {
   id: string;
@@ -97,32 +98,25 @@ function SourceRail({ response }: { response: TaxChatResponse }) {
   );
 }
 
-function ReconciliationTable({ sourceIndex }: { sourceIndex: Record<string, SourceIndexEntry> }) {
-  const rows: Array<[string, string, string, string]> = [
-    ["Stripe 1099-K gross", "$63,000", "Document on file", "doc-stripe-1099-k"],
-    ["Bluepeak 1099-NEC", "$42,000", "Document on file", "doc-bluepeak-1099-nec"],
-    ["Stripe payouts from Bluepeak", "Unknown", "Pull from Stripe dashboard", "clar-income-mismatch"],
-    ["Client estimate of Sch C gross", "~$85,000", "Client claim, not verified", "claim-freelance-85k"],
-  ];
-
+function ReconciliationTable({ table }: { table: ReconciliationTableArtifact }) {
   return (
     <div className="memo-review-table">
-      <div className="memo-table-title">Reconciliation needed</div>
+      <div className="memo-table-title">{table.title}</div>
       <table>
         <thead>
           <tr>
-            <th>Source</th>
-            <th>Amount</th>
-            <th>Status</th>
+            {table.columns.map((column) => <th key={column}>{column}</th>)}
+            <th>State</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map(([label, amount, status, sourceId]) => (
-            <tr key={label}>
-              <td>{label}</td>
-              <td>{amount}</td>
+          {table.rows.map((row) => (
+            <tr key={row.id}>
+              {row.cells.map((cell, index) => (
+                <td key={`${row.id}-${table.columns[index] ?? index}`}>{cell}</td>
+              ))}
               <td>
-                {status} <CitationChip id={sourceId} sourceIndex={sourceIndex} />
+                {row.status.replaceAll("_", " ").toLowerCase()}
               </td>
             </tr>
           ))}
@@ -160,6 +154,9 @@ function ReasoningTrace({ analysis }: { analysis: NonNullable<ChatAnswer["profes
 function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate: boolean }) {
   const { answer, sourceIndex } = response;
   const analyses = answer.professionalAnalyses ?? [];
+  const reconciliationByIssue = new Map(
+    (answer.artifacts?.reconciliationTables ?? []).map((table) => [table.relatedIssueId ?? "return", table]),
+  );
   const animatedLead = useTypewriter(answer.answer.join("\n\n"), animate);
   const leadParagraphs = animatedLead.split("\n\n").filter(Boolean);
   const issueCount = analyses.length;
@@ -211,7 +208,7 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
                 ))}
               </p>
 
-              {analysis.issueId.includes("income") || analysis.issueId.includes("1099k") ? <ReconciliationTable sourceIndex={sourceIndex} /> : null}
+              {reconciliationByIssue.get(analysis.issueId) ? <ReconciliationTable table={reconciliationByIssue.get(analysis.issueId)!} /> : null}
 
               <div className="memo-smell-tests">
                 <strong>EA smell tests</strong>
@@ -534,7 +531,7 @@ export function TaxChatClient({ initialQuestion, initialReturnId }: { initialQue
         ) : (
           <div className="taxgpt-rail-icons" aria-label="Collapsed conversation shortcuts">
             <button type="button" title="Current thread">Q</button>
-            <button type="button" title="Miguel return context">M</button>
+            <button type="button" title="Client return context">C</button>
             <button type="button" title="Sources">S</button>
           </div>
         )}

@@ -10,6 +10,7 @@ import {
   type SourceIndexEntry,
   type TaxChatResponse,
 } from "./tax-chat-shared";
+import { runTaxChatOrchestrator } from "./tax-orchestrator";
 
 type ReasoningOutputView = {
   issueSummaries: {
@@ -101,7 +102,7 @@ function buildCasualAnswer(): ChatAnswer {
       "For casual chat I do not need citations. If we get into tax law or a client file, I’ll show the sources I used.",
     ],
     reasoningSummary: ["No tax conclusion was made, so no authority retrieval is required."],
-    nextSteps: ["Ask a general tax question, open a return context, or ask about Miguel if you want the seeded client file."],
+    nextSteps: ["Ask a general tax question, open a return context, or mention a client by name if you want file context."],
     sourceIds: [],
     citationIds: [],
     suggestedFollowups: suggestedQuestions.slice(0, 4),
@@ -137,6 +138,7 @@ function issueStatusLabel(issue: WorkbenchIssue): string {
 }
 
 function issueSpecificAnalysis(workbench: WorkbenchView, issue: WorkbenchIssue): ProfessionalAnalysisView {
+  const clientName = workbench.client?.displayName ?? "The client";
   const missingFacts = workbench.questions
     .filter((question) => question.relatedIssueId === issue.id && question.status !== "ANSWERED")
     .map((question) => question.question);
@@ -181,7 +183,7 @@ function issueSpecificAnalysis(workbench: WorkbenchView, issue: WorkbenchIssue):
         reviewerChecklist: ["Pull Stripe payout detail.", "Match Stripe payouts against Bluepeak invoices/payment dates.", "Document final gross receipts calculation.", "Approve the accepted gross receipts fact."],
         clearanceStandard: "Clear only when overlap is documented, receipts reconcile, and reviewer approves the final Schedule C gross receipts fact.",
         clientQuestionStrategy: "Ask whether Bluepeak paid through Stripe and request Stripe payout detail or bookkeeping support.",
-        clientCommunicationDraft: `Miguel, we have ${formatMoney(nec)} on the Bluepeak 1099-NEC and ${formatMoney(k1099)} on the Stripe 1099-K, but your organizer says about ${formatMoney(claimed)} of freelance income. Did Bluepeak pay you through Stripe, or are those separate receipts? Please upload Stripe payout detail or a 2024 income ledger.`,
+        clientCommunicationDraft: `${clientName}, we have ${formatMoney(nec)} on the Bluepeak 1099-NEC and ${formatMoney(k1099)} on the Stripe 1099-K, but your organizer says about ${formatMoney(claimed)} of freelance income. Did Bluepeak pay you through Stripe, or are those separate receipts? Please upload Stripe payout detail or a 2024 income ledger.`,
         preparerWorkPlan: ["Build payer/payment-channel table.", "Match Stripe payouts to Bluepeak invoice dates.", "Prepare gross receipts bridge from client claim to source documents.", "Send final receipts fact to reviewer."],
         citationIds: ["cite-schedule-c-gross"],
       };
@@ -219,7 +221,7 @@ function issueSpecificAnalysis(workbench: WorkbenchView, issue: WorkbenchIssue):
         reviewerChecklist: ["Identify brokerage.", "Collect 2024 consolidated 1099-B.", "Review proceeds, basis, holding period, wash-sale indicators."],
         clearanceStandard: "Clear only when brokerage documentation is uploaded or reviewer records an explicit override.",
         clientQuestionStrategy: "Ask which brokerage held Tesla and request the 2024 consolidated tax package.",
-        clientCommunicationDraft: "Miguel, you mentioned selling Tesla stock in March. Which brokerage account held the shares? Please upload the 2024 consolidated 1099 or transaction statement for that account.",
+        clientCommunicationDraft: `${clientName}, you mentioned selling stock in March. Which brokerage account held the shares? Please upload the 2024 consolidated 1099 or transaction statement for that account.`,
         preparerWorkPlan: ["Request brokerage name and tax package.", "Do not enter proceeds/basis from memory.", "Review proceeds/basis/holding period when received."],
       };
     case "STATE_RESIDENCY":
@@ -382,17 +384,17 @@ function buildClientDeepDiveAnswer(workbench: WorkbenchView | null, output: Reas
     ],
     citationIds: output?.authorityContext.citations.map((citation) => citation.citationId) ?? [],
     suggestedFollowups: [
-      "Show Miguel's top blockers.",
+      `Show ${clientName}'s top blockers.`,
       "What source supports each red flag?",
-      "Draft the client questions for Miguel.",
+      `Draft the client questions for ${clientName}.`,
       "What needs reviewer approval?",
-      "What would make Miguel ready for signature?",
+      `What would make ${clientName} ready for signature?`,
     ],
   };
 }
 
 function buildClientLookupAnswer(workbench: WorkbenchView | null): ChatAnswer {
-  const clientName = workbench?.client?.displayName ?? "Miguel Sandoval";
+  const clientName = workbench?.client?.displayName ?? "the selected client";
   const taxReturn = workbench?.taxReturn;
   return {
     mode: "client-return",
@@ -423,7 +425,7 @@ function buildClientLookupAnswer(workbench: WorkbenchView | null): ChatAnswer {
 }
 
 function buildClientStatusAnswer(workbench: WorkbenchView | null): ChatAnswer {
-  const clientName = workbench?.client?.displayName ?? "Miguel Sandoval";
+  const clientName = workbench?.client?.displayName ?? "the selected client";
   const activeIssues = workbench?.issues.filter((issue) => issue.status !== "RESOLVED" && issue.status !== "WAIVED_BY_REVIEWER") ?? [];
   const redIssues = activeIssues.filter((issue) => issue.riskLevel === "RED");
   const blockerIssues = activeIssues.filter((issue) => issue.blocker);
@@ -475,6 +477,7 @@ function buildClientStatusAnswer(workbench: WorkbenchView | null): ChatAnswer {
 
 async function buildGroundedAnswer(question: string, output: ReasoningOutputView | null, hasClientContext: boolean, workbench: WorkbenchView | null): Promise<ChatAnswer> {
   const q = question.toLowerCase();
+  const clientName = workbench?.client?.displayName ?? "the selected client";
   const incomeIssue = findIssue(output, "issue-income-mismatch");
   const overlapIssue = findIssue(output, "issue-1099k-overlap");
   const stockIssue = findIssue(output, "issue-missing-1099-b");
@@ -483,6 +486,18 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
   const stateIssue = findIssue(output, "issue-state-residency");
   const allIssueSourceIds = output?.issueSummaries.flatMap((issue) => issue.sourceIds) ?? [];
   const allCitationIds = output?.authorityContext.citations.map((citation) => citation.citationId) ?? [];
+  const activeIssues = workbench?.issues.filter((issue) => issue.status !== "RESOLVED" && issue.status !== "WAIVED_BY_REVIEWER") ?? [];
+  const blockerIssues = activeIssues.filter((issue) => issue.blocker);
+  const redIssues = activeIssues.filter((issue) => issue.riskLevel === "RED");
+  const gateBlockers = workbench?.readyToFileGate.blockers ?? [];
+  const missingDocuments = workbench?.missingDocuments.filter((document) => document.status !== "RECEIVED") ?? [];
+  const topIssueTitles = (blockerIssues.length ? blockerIssues : redIssues.length ? redIssues : activeIssues)
+    .slice(0, 4)
+    .map((issue) => issue.title);
+  const topIssueText = topIssueTitles.length ? topIssueTitles.join("; ") : "No active blocker issues are currently open.";
+  const missingDocumentText = missingDocuments.length
+    ? missingDocuments.map((document) => document.expectedDocumentClass.replaceAll("_", " ")).join(", ")
+    : "No open missing-document signal is currently recorded.";
 
   if (isCasualMessage(question)) return buildCasualAnswer();
   if (!question.trim()) {
@@ -534,64 +549,80 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
   if (q.includes("block") || q.includes("ready") || q.includes("file") || q.includes("safely conclude")) {
     return {
       mode: "client-return",
-      headline: "Miguel is not ready to file because several blocker and review-gated items remain open.",
+      headline: `${clientName}'s ready-to-file answer is controlled by review gates.`,
       answer: [
-        "The red blockers are the unreconciled Schedule C income and the missing 1099-B after Miguel mentioned selling Tesla stock.",
-        "Docket can summarize the issues and draft questions, but it should not mark the return ready to file until red flags are resolved, client clarifications are answered, material facts are reviewer-approved, and signature/8879 status is complete.",
+        gateBlockers.length > 0
+          ? `${clientName} is not ready to file because the ready-to-file gate is blocked by: ${gateBlockers.join("; ")}.`
+          : `${clientName}'s persisted ready-to-file gate has no listed blocker in the current state.`,
+        `The active issue queue is: ${topIssueText}. Open missing document signals: ${missingDocumentText}.`,
+        "Docket can summarize the issues and draft questions, but it should not mark a return ready to file until red flags are resolved, client clarifications are answered, material facts are reviewer-approved, and signature/8879 status is complete.",
       ],
       reasoningSummary: [
-        "I matched the question to the return readiness and issue graph for Miguel's 2024 1040 + Schedule C return.",
-        "The income mismatch is blocker-level because Miguel's $85K claim does not reconcile to the 1099-NEC and 1099-K evidence.",
-        "The stock-sale transcript creates an expected brokerage document signal, but no 1099-B is currently in the source document set.",
+        `I matched the question to ${clientName}'s return readiness, active issue graph, missing-document signals, and ready-to-file gate.`,
+        "The clearance verdict comes from review gates, not the workflow readiness percentage.",
+        "Issue-specific details below come from the selected client return rather than a hardcoded demo path.",
       ],
       nextSteps: [
-        "Ask Miguel whether Stripe 1099-K receipts overlap with Bluepeak 1099-NEC payments.",
-        "Request the 2024 consolidated brokerage 1099 for the Tesla sale.",
+        ...(workbench?.questions
+          .filter((questionItem) => questionItem.status !== "ANSWERED")
+          .map((questionItem) => questionItem.question)
+          .slice(0, 2) ?? []),
+        ...(gateBlockers.length > 0 ? ["Clear the ready-to-file gate blockers through documented reviewer action."] : []),
         "Route material facts and any resolved red flags through reviewer approval before filing readiness.",
       ],
-      professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-income-mismatch", "issue-missing-1099-b"]),
-      sourceIds: [...(incomeIssue?.sourceIds ?? []), ...(stockIssue?.sourceIds ?? []), ...allIssueSourceIds],
+      professionalAnalyses: professionalAnalysesForAnswer(workbench, output, blockerIssues.map((issue) => issue.id)),
+      sourceIds: [...allIssueSourceIds, ...missingDocuments.flatMap((document) => document.sourceIds)],
       citationIds: [...(incomeIssue?.citationIds ?? []), ...allCitationIds],
-      suggestedFollowups: ["Show me the income mismatch evidence.", "Draft the exact client questions.", "What review gates are still blocking Miguel?"],
+      suggestedFollowups: [`Show ${clientName}'s top issue evidence.`, "Draft the exact client questions.", `What review gates are still blocking ${clientName}?`],
     };
   }
 
   if (q.includes("income") || q.includes("freelance") || q.includes("1099-k") || q.includes("1099k") || q.includes("1099-nec") || q.includes("reconcile")) {
     return {
       mode: "client-return",
-      headline: "Miguel's freelance income does not reconcile yet.",
+      headline: `${clientName}'s income needs source-backed reconciliation.`,
       answer: [
-        "Miguel claimed about $85K of freelance income. The current source documents show a Bluepeak 1099-NEC for $42K and a Stripe 1099-K for $63K.",
-        "Those documents total $105K if fully separate, but they may overlap. Docket should not set final Schedule C gross receipts until the overlap question is answered and reviewed.",
+        incomeIssue?.recommendedAction ?? "Docket should separate client claims from document-backed income facts before accepting final gross receipts.",
+        "If payer or processor documents may overlap, the system should build a reconciliation table and keep final income facts in review until the overlap is resolved.",
       ],
       reasoningSummary: ["I separated the client claim from document-backed facts.", "The variance is material enough to keep Schedule C gross receipts blocked."],
-      nextSteps: ["Ask whether the Stripe 1099-K includes payments also reported on the Bluepeak 1099-NEC.", "Request Stripe detail or bookkeeping support.", "Keep the income issue open until the reviewer accepts the reconciled gross receipts fact."],
+      nextSteps: [
+        ...(workbench?.questions.filter((questionItem) => questionItem.relatedIssueId === incomeIssue?.issueId || questionItem.relatedIssueId === overlapIssue?.issueId).map((questionItem) => questionItem.question).slice(0, 2) ?? []),
+        "Request payer/payment-channel detail or bookkeeping support.",
+        "Keep the income issue open until the reviewer accepts the reconciled gross receipts fact.",
+      ],
       professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-income-mismatch", "issue-1099k-overlap"]),
       sourceIds: [...(incomeIssue?.sourceIds ?? []), ...(overlapIssue?.sourceIds ?? [])],
       citationIds: [...(incomeIssue?.citationIds ?? []), ...(overlapIssue?.citationIds ?? [])],
-      suggestedFollowups: ["What exact question should we ask Miguel?", "What facts are established versus claimed?", "What workpaper should this create?"],
+      suggestedFollowups: [`What exact question should we ask ${clientName}?`, "What facts are established versus claimed?", "What workpaper should this create?"],
     };
   }
 
   if (q.includes("1099-b") || q.includes("broker") || q.includes("stock") || q.includes("tesla")) {
     return {
       mode: "client-return",
-      headline: "A 1099-B or consolidated brokerage statement is expected for Miguel.",
-      answer: ["Miguel said in the meeting transcript that he sold Tesla stock in March. Docket also has a prior-year brokerage pattern.", "No 1099-B is currently in the document set, so the stock-sale issue remains a red blocker for the return workflow."],
+      headline: `A brokerage document may be expected for ${clientName}.`,
+      answer: [
+        stockIssue?.recommendedAction ?? "Docket detected a stock or brokerage signal and should request a 1099-B or consolidated brokerage statement before clearing the return.",
+        "Treat conversation references as claims until proceeds, basis, holding period, and wash-sale detail are supported by documents or reviewer override.",
+      ],
       reasoningSummary: ["I treated the transcript as a conversation claim, not a verified tax fact.", "Docket creates a missing document signal instead of inventing basis or proceeds."],
-      nextSteps: ["Ask which brokerage held the Tesla shares.", "Request the 2024 consolidated 1099 or transaction statement.", "Escalate if the client cannot provide basis or proceeds support."],
+      nextSteps: ["Ask which brokerage held the shares.", "Request the 2024 consolidated 1099 or transaction statement.", "Escalate if the client cannot provide basis or proceeds support."],
       professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-missing-1099-b"]),
       sourceIds: stockIssue?.sourceIds ?? ["insight-stock-sale", "pattern-brokerage"],
       citationIds: stockIssue?.citationIds ?? [],
-      suggestedFollowups: ["Draft the brokerage document request.", "What can we do if Miguel cannot find the 1099-B?", "Show all missing documents."],
+      suggestedFollowups: ["Draft the brokerage document request.", `What can we do if ${clientName} cannot find the 1099-B?`, "Show all missing documents."],
     };
   }
 
   if (q.includes("home office") || q.includes("exclusive") || q.includes("office deduction")) {
     return {
       mode: "client-return",
-      headline: "Miguel has a possible home office opportunity, but Docket should not auto-claim it.",
-      answer: ["The opportunity is detected because Miguel has Schedule C activity and mentioned using a room at home as an office.", "The issue is not ready because he also said guests sometimes stay there, so exclusive use is not confirmed."],
+      headline: `${clientName} has a possible home office opportunity, but Docket should not auto-claim it.`,
+      answer: [
+        homeOfficeIssue?.recommendedAction ?? "The opportunity needs exclusive-use and regular-use facts before it can be considered for filing.",
+        "Docket should keep this as a review-needed opportunity until the client confirms facts and the reviewer accepts the position.",
+      ],
       reasoningSummary: ["I matched the conversation insight to the Schedule C context and checked the substantiation gap.", "Publication 587 is cited for the exclusive and regular business use requirement."],
       nextSteps: ["Ask whether the space was used exclusively and regularly for business during 2024.", "Collect square footage and expense support only if exclusive use is confirmed.", "Route the opportunity for reviewer approval."],
       professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-home-office-exclusive-use"]),
@@ -604,8 +635,11 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
   if (q.includes("mileage") || q.includes("car") || q.includes("vehicle")) {
     return {
       mode: "client-return",
-      headline: "Miguel's mileage is a possible deduction, but support is incomplete.",
-      answer: ["Docket sees a Q4 mileage log, so business mileage is a possible deduction opportunity.", "The concern is that the log lacks full-year coverage and business-purpose support, so it should remain review-needed."],
+      headline: `${clientName}'s mileage or vehicle deduction needs substantiation review.`,
+      answer: [
+        mileageIssue?.recommendedAction ?? "Business mileage should remain review-needed until the records show date, destination, miles, and business purpose.",
+        "Docket should not extrapolate partial records or auto-claim a deduction without source-backed support.",
+      ],
       reasoningSummary: ["I matched the uploaded mileage log to the deduction opportunity engine.", "Publication 463 is cited for mileage and travel record support."],
       nextSteps: ["Request the full-year contemporaneous mileage log.", "Confirm date, destination, miles, and business purpose for each trip.", "Keep the deduction out of final filing readiness until reviewer approval."],
       professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-mileage-substantiation"]),
@@ -618,14 +652,17 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
   if (q.includes("extension")) {
     return {
       mode: "client-return",
-      headline: "Docket should recommend preparing an extension for Miguel now.",
-      answer: ["Miguel's extension risk is high because a 1099-B is missing, red flags remain unresolved, state residency facts need follow-up, and he is a slow responder.", "This is a workflow recommendation to reduce deadline risk while the firm resolves blockers."],
+      headline: `Docket should treat ${clientName}'s extension risk as a workflow decision, not a tax conclusion.`,
+      answer: [
+        `${clientName}'s extension risk score is ${workbench?.extension.extensionRiskScore ?? 0}%. Drivers: ${(workbench?.extension.reasons ?? []).join("; ") || "No drivers currently recorded."}`,
+        "This is a workflow recommendation to reduce deadline risk while the firm resolves blockers.",
+      ],
       reasoningSummary: ["I combined missing material documents, red issues, unanswered questions, prior-year extension history, and client response latency."],
       nextSteps: ["Prepare the extension workflow while continuing document collection.", "Prioritize the 1099-B and income-overlap clarification.", "Keep reviewer approval gates in place before signature or filing readiness."],
       professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-income-mismatch", "issue-missing-1099-b", "issue-state-residency"]),
       sourceIds: [...(stockIssue?.sourceIds ?? []), ...(incomeIssue?.sourceIds ?? []), ...(stateIssue?.sourceIds ?? [])],
       citationIds: allCitationIds,
-      suggestedFollowups: ["What are the reasons for the extension risk score?", "What would lower Miguel's extension risk?", "Which client reminders should we send today?"],
+      suggestedFollowups: ["What are the reasons for the extension risk score?", `What would lower ${clientName}'s extension risk?`, "Which client reminders should we send today?"],
     };
   }
 
@@ -633,19 +670,23 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
     return {
       mode: "client-return",
       headline: "The next client questions should target facts that unlock blocked sections.",
-      answer: ["The most important questions are about 1099-K overlap, the Tesla brokerage account, the exact CA-to-TX move date, and home office exclusive use."],
+      answer: [
+        output?.clientQuestions.length
+          ? `The highest-value questions for ${clientName} are the ones already tied to open issues and missing facts in the return file.`
+          : `No generated question packet is currently available for ${clientName}; run the prep/reasoning workflow to generate one.`,
+      ],
       reasoningSummary: ["I prioritized questions tied to blocker issues before nonblocking opportunities."],
       nextSteps: output?.clientQuestions.map((questionItem) => questionItem.question).slice(0, 5) ?? ["Run AI Prep to generate targeted client questions."],
       professionalAnalyses: professionalAnalysesForAnswer(workbench, output),
       sourceIds: output?.clientQuestions.flatMap((questionItem) => questionItem.sourceIds) ?? [],
       citationIds: output?.clientQuestions.flatMap((questionItem) => questionItem.citationIds) ?? [],
-      suggestedFollowups: ["Draft the exact client message.", "Which questions require reviewer approval?", "What questions can the portal show Miguel?"],
+      suggestedFollowups: ["Draft the exact client message.", "Which questions require reviewer approval?", `What questions can the portal show ${clientName}?`],
     };
   }
 
   return {
     mode: "client-return",
-    headline: "I have Miguel's file open. What view do you want?",
+    headline: `I have ${clientName}'s file open. What view do you want?`,
     answer: [
       "I found the client context, but your request is not specific enough for me to run a reviewer memo or make a tax conclusion.",
       "Choose a narrower path: status, filing blockers, missing documents, source evidence, client questions, reconciliation table, extension risk, or full deep dive.",
@@ -655,17 +696,17 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
       "Docket should ask for scope before producing analysis that looks authoritative.",
     ],
     nextSteps: [
-      "Ask: 'Give me Miguel's status summary.'",
-      "Ask: 'Show Miguel's filing blockers.'",
-      "Ask: 'Run the full reviewer memo for Miguel.'",
+      `Ask: 'Give me ${clientName}'s status summary.'`,
+      `Ask: 'Show ${clientName}'s filing blockers.'`,
+      `Ask: 'Run the full reviewer memo for ${clientName}.'`,
     ],
     sourceIds: [],
     citationIds: [],
     suggestedFollowups: [
-      "Give me Miguel's status summary.",
-      "Show Miguel's filing blockers.",
-      "Show the evidence for Miguel's income mismatch.",
-      "Run the full reviewer memo for Miguel.",
+      `Give me ${clientName}'s status summary.`,
+      `Show ${clientName}'s filing blockers.`,
+      `Show the evidence for ${clientName}'s top issue.`,
+      `Run the full reviewer memo for ${clientName}.`,
     ],
   };
 }
@@ -731,6 +772,13 @@ export async function buildTaxChatResponse(question: string, returnId?: string, 
   const output = asReasoningOutputView(workbench?.latestAIReasoningRun?.output);
   const sourceIndex = workbench?.reasoningSourceIndex ?? {};
   const draftAnswer = await buildGroundedAnswer(question, output, hasClientContext, workbench);
+  if (workbench) {
+    draftAnswer.artifacts = runTaxChatOrchestrator({
+      question,
+      returnId: workbench.taxReturn.id,
+      history: conversationHistory,
+    });
+  }
   return {
     answer: maybeSynthesizeWithClaude(question, draftAnswer, workbench, sourceIndex, conversationHistory),
     sourceIndex,
