@@ -32,6 +32,13 @@ export type SourceAuthorityRole =
   | "CURATED_SECONDARY_ANALYSIS"
   | "COMMUNITY_SIGNAL";
 
+export type DocketKnowledgeSubSource = {
+  id: string;
+  name: string;
+  sourceUrl: string;
+  notes: string;
+};
+
 export type DocketKnowledgeSource = {
   id: string;
   priority: number;
@@ -49,6 +56,14 @@ export type DocketKnowledgeSource = {
   conflictRule: string;
   topicTags: string[];
   notes: string;
+  includedSources?: DocketKnowledgeSubSource[];
+};
+
+export type DocketKnowledgeSourceTier = {
+  tier: number;
+  title: string;
+  description: string;
+  sourceIds: string[];
 };
 
 export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
@@ -69,6 +84,32 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Controls over all lower authority unless superseded by later statute.",
     topicTags: ["statute", "26 usc", "internal revenue code", "primary authority"],
     notes: "Every substantive federal tax conclusion should eventually trace to statute when practical.",
+    includedSources: [
+      {
+        id: "law-gov-structured-law",
+        name: "law.gov structured law access",
+        sourceUrl: "https://www.law.gov/",
+        notes: "Structured-law access layer from the project memory; validate current coverage before production ingestion.",
+      },
+      {
+        id: "olrc-us-code-title-26",
+        name: "Office of the Law Revision Counsel / U.S. Code Title 26",
+        sourceUrl: "https://uscode.house.gov/browse/prelim@title26",
+        notes: "Official U.S. Code access point for Title 26 section-level statutory nodes.",
+      },
+      {
+        id: "govinfo-us-code",
+        name: "govinfo U.S. Code packages/API",
+        sourceUrl: "https://www.govinfo.gov/app/collection/uscode",
+        notes: "Structured government publishing source for U.S. Code packages and metadata.",
+      },
+      {
+        id: "cornell-lii-title-26",
+        name: "Cornell Legal Information Institute Title 26 mirror",
+        sourceUrl: "https://www.law.cornell.edu/uscode/text/26",
+        notes: "Useful access/search layer; Docket should still preserve official statute citation identity.",
+      },
+    ],
   },
   {
     id: "treasury-regulations-title-26",
@@ -87,6 +128,20 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Controls over IRS publications, FAQs, forms, and community sources.",
     topicTags: ["regulation", "26 cfr", "ecfr", "treasury regulations"],
     notes: "Use the eCFR API as the preferred current regulation source.",
+    includedSources: [
+      {
+        id: "ecfr-title-26",
+        name: "eCFR Title 26",
+        sourceUrl: "https://www.ecfr.gov/current/title-26",
+        notes: "Preferred current regulation source for title, part, section, and amendment metadata.",
+      },
+      {
+        id: "ecfr-api",
+        name: "eCFR API",
+        sourceUrl: "https://www.ecfr.gov/developers/documentation/api/v1",
+        notes: "Machine-ingestion path for current and historical regulation text.",
+      },
+    ],
   },
   {
     id: "federal-register-treasury-decisions",
@@ -105,6 +160,20 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Final rules and Treasury Decisions override stale regulation snapshots after approved rule-package update.",
     topicTags: ["federal register", "treasury decision", "final regulation", "proposed regulation"],
     notes: "Research can surface immediately; automated filing logic changes require approved rule packages.",
+    includedSources: [
+      {
+        id: "federal-register-irs-agency",
+        name: "Federal Register IRS agency documents",
+        sourceUrl: "https://www.federalregister.gov/agencies/internal-revenue-service",
+        notes: "Agency-filtered rulemaking, notices, corrections, and Treasury Decision monitoring.",
+      },
+      {
+        id: "federal-register-api",
+        name: "Federal Register API",
+        sourceUrl: "https://www.federalregister.gov/developers/documentation/api/v1",
+        notes: "Machine-ingestion path for Federal Register deltas and metadata.",
+      },
+    ],
   },
   {
     id: "internal-revenue-bulletin",
@@ -123,6 +192,38 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Ranks below statute and regulations, above forms, publications, FAQs, and secondary sources.",
     topicTags: ["irb", "revenue ruling", "revenue procedure", "notice", "announcement"],
     notes: "This is the IRS's official weekly publication channel for its published guidance.",
+    includedSources: [
+      {
+        id: "irs-irb",
+        name: "IRS Internal Revenue Bulletin",
+        sourceUrl: "https://www.irs.gov/irb",
+        notes: "Primary IRS channel for published guidance such as Revenue Rulings, Revenue Procedures, Notices, and Announcements.",
+      },
+      {
+        id: "irs-irb-rss",
+        name: "IRS IRB RSS feeds",
+        sourceUrl: "https://www.irs.gov/newsroom/irs-newswire",
+        notes: "Monitoring path for official IRS publication updates; link each alert to the underlying IRB item.",
+      },
+      {
+        id: "irs-revenue-rulings",
+        name: "Revenue Rulings",
+        sourceUrl: "https://www.irs.gov/irb",
+        notes: "Official IRS interpretations of tax law applied to stated facts.",
+      },
+      {
+        id: "irs-revenue-procedures",
+        name: "Revenue Procedures",
+        sourceUrl: "https://www.irs.gov/irb",
+        notes: "Official IRS procedural guidance and safe-harbor workflows.",
+      },
+      {
+        id: "irs-notices-announcements",
+        name: "IRS Notices and Announcements",
+        sourceUrl: "https://www.irs.gov/irb",
+        notes: "Official IRS updates, relief, transitional guidance, and announcements.",
+      },
+    ],
   },
   {
     id: "irs-forms-instructions-publications",
@@ -141,6 +242,50 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Operationally strong, but loses to statute, regulations, Federal Register, and IRB where inconsistent.",
     topicTags: ["forms", "instructions", "publication", "post-release changes", "irs"],
     notes: "Critical for preparer workflows, workpapers, client questions, and return workbench explanations.",
+    includedSources: [
+      {
+        id: "irs-forms-pubs",
+        name: "IRS Forms, Instructions, and Publications",
+        sourceUrl: "https://www.irs.gov/forms-instructions-and-publications",
+        notes: "Central IRS entry point for current and prior-year forms, instructions, and publications.",
+      },
+      {
+        id: "irs-post-release-changes",
+        name: "IRS Post-Release Changes to Forms",
+        sourceUrl: "https://www.irs.gov/forms-pubs/changes-to-current-forms-publications",
+        notes: "Critical freshness source for changed forms, instructions, and publications after release.",
+      },
+      {
+        id: "irs-pub-17",
+        name: "Publication 17",
+        sourceUrl: "https://www.irs.gov/forms-pubs/about-publication-17",
+        notes: "Broad individual income tax guide, useful for 1040-facing research and client explanations.",
+      },
+      {
+        id: "irs-pub-535",
+        name: "Publication 535",
+        sourceUrl: "https://www.irs.gov/forms-pubs/about-publication-535",
+        notes: "Business expense reference source for Schedule C and business deduction workflows.",
+      },
+      {
+        id: "irs-pub-463",
+        name: "Publication 463",
+        sourceUrl: "https://www.irs.gov/forms-pubs/about-publication-463",
+        notes: "Travel, gift, car expenses, mileage, and substantiation source.",
+      },
+      {
+        id: "irs-pub-946",
+        name: "Publication 946",
+        sourceUrl: "https://www.irs.gov/forms-pubs/about-publication-946",
+        notes: "Depreciation reference source.",
+      },
+      {
+        id: "irs-schedule-c-instructions",
+        name: "Schedule C Instructions",
+        sourceUrl: "https://www.irs.gov/forms-pubs/about-schedule-c-form-1040",
+        notes: "Operational source for sole proprietor income and expense reporting.",
+      },
+    ],
   },
   {
     id: "irs-direct-file-openfile-fact-graph",
@@ -159,6 +304,20 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Never overrides current statute, regulations, forms, or instructions.",
     topicTags: ["direct file", "openfile", "fact graph", "form logic", "eligibility"],
     notes: "Excellent skeleton for deterministic logic, but not by itself authority for a tax conclusion.",
+    includedSources: [
+      {
+        id: "irs-public-direct-file",
+        name: "IRS-Public/direct-file",
+        sourceUrl: "https://github.com/IRS-Public/direct-file",
+        notes: "Official IRS Direct File repository when available; use as structured historical logic source.",
+      },
+      {
+        id: "openfiletax-openfile",
+        name: "openfiletax/openfile",
+        sourceUrl: "https://github.com/openfiletax/openfile",
+        notes: "Community mirror/fork path mentioned in the convo; validate all logic against current IRS authority.",
+      },
+    ],
   },
   {
     id: "irs-mef-schemas-business-rules",
@@ -195,6 +354,20 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Court hierarchy and precedential status must be preserved; not all opinions bind every case.",
     topicTags: ["tax court", "case law", "substantiation", "penalties", "deductions"],
     notes: "High value for risk scoring, substantiation, penalties, and issue escalation.",
+    includedSources: [
+      {
+        id: "us-tax-court-opinions-official",
+        name: "U.S. Tax Court Opinions",
+        sourceUrl: "https://www.ustaxcourt.gov/opinions.html",
+        notes: "Official opinions source.",
+      },
+      {
+        id: "us-tax-court-ef-cms",
+        name: "U.S. Tax Court EF-CMS repository",
+        sourceUrl: "https://github.com/ustaxcourt/ef-cms",
+        notes: "Open-source case-management patterns, useful architecturally but not tax-law authority.",
+      },
+    ],
   },
   {
     id: "federal-tax-court-decisions",
@@ -213,6 +386,38 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Respect jurisdiction, court level, precedential status, and later appellate history.",
     topicTags: ["courtlistener", "federal courts", "tax cases", "precedent"],
     notes: "Important for controversy, refund claims, circuit splits, and high-materiality positions.",
+    includedSources: [
+      {
+        id: "courtlistener",
+        name: "CourtListener",
+        sourceUrl: "https://www.courtlistener.com/",
+        notes: "Practical search/API layer for federal opinions and dockets.",
+      },
+      {
+        id: "pacer",
+        name: "PACER",
+        sourceUrl: "https://pacer.uscourts.gov/",
+        notes: "Official federal court record access where needed.",
+      },
+      {
+        id: "court-of-federal-claims",
+        name: "U.S. Court of Federal Claims",
+        sourceUrl: "https://www.uscfc.uscourts.gov/",
+        notes: "Important refund litigation and federal claims tax source.",
+      },
+      {
+        id: "district-courts-tax",
+        name: "Federal District Court tax decisions",
+        sourceUrl: "https://www.uscourts.gov/about-federal-courts/court-role-and-structure",
+        notes: "Jurisdiction-sensitive tax cases outside Tax Court.",
+      },
+      {
+        id: "circuit-courts-tax",
+        name: "Federal Circuit Court tax decisions",
+        sourceUrl: "https://www.uscourts.gov/about-federal-courts/court-role-and-structure",
+        notes: "Appellate authority and circuit split tracking.",
+      },
+    ],
   },
   {
     id: "irs-written-determinations",
@@ -231,6 +436,26 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Label as nonprecedential; cannot alone support a trusted tax conclusion.",
     topicTags: ["written determinations", "chief counsel advice", "plr", "tam", "nonprecedential"],
     notes: "Useful for research context, not a substitute for binding authority.",
+    includedSources: [
+      {
+        id: "chief-counsel-advice",
+        name: "Chief Counsel Advice",
+        sourceUrl: "https://www.irs.gov/privacy-disclosure/about-irs-written-determinations",
+        notes: "Nonprecedential IRS legal analysis; useful for edge-case research.",
+      },
+      {
+        id: "private-letter-rulings",
+        name: "Private Letter Rulings",
+        sourceUrl: "https://www.irs.gov/privacy-disclosure/about-irs-written-determinations",
+        notes: "Nonprecedential taxpayer-specific rulings.",
+      },
+      {
+        id: "technical-advice-memoranda",
+        name: "Technical Advice Memoranda",
+        sourceUrl: "https://www.irs.gov/privacy-disclosure/about-irs-written-determinations",
+        notes: "Nonprecedential technical advice in specific factual contexts.",
+      },
+    ],
   },
   {
     id: "state-tax-authorities",
@@ -249,6 +474,26 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Controls only for matching jurisdiction and tax year.",
     topicTags: ["state tax", "ftb", "dor", "residency", "multi-state"],
     notes: "Prioritize CA, NY, TX, FL, NJ, IL, and customer-driven states.",
+    includedSources: [
+      {
+        id: "california-ftb",
+        name: "California Franchise Tax Board",
+        sourceUrl: "https://www.ftb.ca.gov/",
+        notes: "Priority state source for California residency, filing, and state tax guidance.",
+      },
+      {
+        id: "new-york-dtf",
+        name: "New York Department of Taxation and Finance",
+        sourceUrl: "https://www.tax.ny.gov/",
+        notes: "Priority state source for New York tax guidance.",
+      },
+      {
+        id: "state-dor-guidance",
+        name: "State DOR guidance",
+        sourceUrl: "https://www.taxadmin.org/state-tax-agencies",
+        notes: "State-by-state DOR/statutory/regulatory adapters.",
+      },
+    ],
   },
   {
     id: "internal-revenue-manual",
@@ -285,6 +530,20 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Controls Docket professional-control gates, not taxpayer substantive tax treatment.",
     topicTags: ["circular 230", "opr", "diligence", "competence", "ethics"],
     notes: "This is the legal/compliance backbone for AI prepares, humans approve.",
+    includedSources: [
+      {
+        id: "circular-230",
+        name: "Circular 230",
+        sourceUrl: "https://www.irs.gov/tax-professionals/circular-230-tax-professionals",
+        notes: "Practice-before-the-IRS duties and sanctions source.",
+      },
+      {
+        id: "irs-office-professional-responsibility",
+        name: "IRS Office of Professional Responsibility",
+        sourceUrl: "https://www.irs.gov/tax-professionals/office-of-professional-responsibility",
+        notes: "OPR guidance, compliance expectations, and disciplinary context.",
+      },
+    ],
   },
   {
     id: "opr-disciplinary-actions",
@@ -303,6 +562,20 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Never supports tax treatment; only informs compliance and preparer-risk detection.",
     topicTags: ["opr", "disciplinary actions", "suspension", "disbarment", "circular 230"],
     notes: "This is the name-and-shame layer from the Antonio conversation.",
+    includedSources: [
+      {
+        id: "disciplined-tax-professionals",
+        name: "Disciplined Tax Professionals",
+        sourceUrl: "https://www.irs.gov/tax-professionals/disciplined-tax-professionals",
+        notes: "Public IRS list of disciplined practitioners.",
+      },
+      {
+        id: "opr-final-agency-decisions",
+        name: "OPR Final Agency Decisions",
+        sourceUrl: "https://www.irs.gov/tax-professionals/office-of-professional-responsibility",
+        notes: "Public discipline decisions to map conduct patterns to Circular 230 duties.",
+      },
+    ],
   },
   {
     id: "irs-e-news-tax-professionals",
@@ -378,7 +651,7 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
   },
   {
     id: "premium-practitioner-research",
-    priority: 19,
+    priority: 22,
     name: "Premium Practitioner Research",
     graphLayer: "PRACTITIONER_INTERPRETATION_LAYER",
     authorityRole: "CURATED_SECONDARY_ANALYSIS",
@@ -393,10 +666,30 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Never outranks primary authority; cite as secondary analysis only.",
     topicTags: ["checkpoint", "bloomberg tax", "cch", "secondary analysis"],
     notes: "Useful later when revenue supports licensing.",
+    includedSources: [
+      {
+        id: "thomson-reuters-checkpoint",
+        name: "Thomson Reuters Checkpoint",
+        sourceUrl: "https://tax.thomsonreuters.com/en/checkpoint",
+        notes: "Premium licensed practitioner research.",
+      },
+      {
+        id: "bloomberg-tax",
+        name: "Bloomberg Tax",
+        sourceUrl: "https://pro.bloombergtax.com/",
+        notes: "Premium licensed practitioner research.",
+      },
+      {
+        id: "cch-answerconnect",
+        name: "CCH AnswerConnect",
+        sourceUrl: "https://www.wolterskluwer.com/en/solutions/answerconnect",
+        notes: "Premium licensed practitioner research from Wolters Kluwer.",
+      },
+    ],
   },
   {
     id: "affordable-practitioner-sources",
-    priority: 20,
+    priority: 19,
     name: "Affordable Practitioner Sources",
     graphLayer: "PRACTITIONER_INTERPRETATION_LAYER",
     authorityRole: "CURATED_SECONDARY_ANALYSIS",
@@ -411,10 +704,42 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Secondary interpretation only; cite underlying law before trusted conclusions.",
     topicTags: ["thetaxbook", "parker tax", "spidell", "natp", "naea", "ce"],
     notes: "Good for cheap, practical coverage and workflow wording, but not authority.",
+    includedSources: [
+      {
+        id: "the-tax-book",
+        name: "TheTaxBook",
+        sourceUrl: "https://www.thetaxbook.com/",
+        notes: "Affordable practitioner reference used by many small firms.",
+      },
+      {
+        id: "parker-tax-publishing",
+        name: "Parker Tax Publishing",
+        sourceUrl: "https://www.parkertaxpublishing.com/",
+        notes: "Affordable practitioner research/news source.",
+      },
+      {
+        id: "spidell-publishing",
+        name: "Spidell Publishing",
+        sourceUrl: "https://www.caltax.com/",
+        notes: "Strong California practitioner source.",
+      },
+      {
+        id: "natp",
+        name: "National Association of Tax Professionals",
+        sourceUrl: "https://www.natptax.com/",
+        notes: "Vetted practitioner education and publications.",
+      },
+      {
+        id: "naea",
+        name: "National Association of Enrolled Agents",
+        sourceUrl: "https://www.naea.org/",
+        notes: "EA-focused publications and education.",
+      },
+    ],
   },
   {
     id: "credentialed-community-sources",
-    priority: 21,
+    priority: 20,
     name: "Credentialed Community Sources",
     graphLayer: "COMMUNITY_SIGNAL_LAYER",
     authorityRole: "COMMUNITY_SIGNAL",
@@ -429,10 +754,48 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Cannot write to the authority graph without credentialed human review and official-source backing.",
     topicTags: ["taxprotalk", "reddit taxpros", "naea webboard", "drake forum", "community signal"],
     notes: "Use to discover what preparers are struggling with, not to answer clients.",
+    includedSources: [
+      {
+        id: "taxprotalk",
+        name: "TaxProTalk",
+        sourceUrl: "https://www.taxprotalk.com/",
+        notes: "Solo and small-firm practitioner discussion signal.",
+      },
+      {
+        id: "reddit-taxpros",
+        name: "r/taxpros",
+        sourceUrl: "https://www.reddit.com/r/taxpros/",
+        notes: "Practitioner community signal; only use with credential/context awareness.",
+      },
+      {
+        id: "naea-webboard",
+        name: "NAEA WebBoard",
+        sourceUrl: "https://www.naea.org/",
+        notes: "Members-only EA discussion signal if licensed/access is available.",
+      },
+      {
+        id: "drake-software-forum",
+        name: "Drake Software Forum",
+        sourceUrl: "https://forum.drakesoftware.com/",
+        notes: "Software-specific working preparer signal.",
+      },
+      {
+        id: "taxact-pro-community",
+        name: "TaxAct Pro Community",
+        sourceUrl: "https://www.taxact.com/professional",
+        notes: "Software-specific working preparer signal.",
+      },
+      {
+        id: "csea-chapter-networks",
+        name: "CSEA chapter Slack/email lists",
+        sourceUrl: "https://www.csea.org/",
+        notes: "California EA network signal if Antonio or another advisor can bridge access.",
+      },
+    ],
   },
   {
     id: "open-social-tax-signals",
-    priority: 22,
+    priority: 21,
     name: "Open Social / Tax Twitter",
     graphLayer: "COMMUNITY_SIGNAL_LAYER",
     authorityRole: "COMMUNITY_SIGNAL",
@@ -447,11 +810,92 @@ export const KNOWLEDGE_GRAPH_SOURCE_REGISTRY: DocketKnowledgeSource[] = [
     conflictRule: "Never authority; only creates candidate research tasks.",
     topicTags: ["tax twitter", "social", "trend", "early warning"],
     notes: "Lowest trust. Useful only as smoke detector for topics that need real authority retrieval.",
+    includedSources: [
+      {
+        id: "tax-twitter",
+        name: "TaxTwitter / X #TaxTwitter",
+        sourceUrl: "https://x.com/search?q=%23TaxTwitter",
+        notes: "Fast, noisy public practitioner signal.",
+      },
+      {
+        id: "ea-tax-twitter",
+        name: "TaxTwitter / X #EATax",
+        sourceUrl: "https://x.com/search?q=%23EATax",
+        notes: "EA-focused public practitioner signal.",
+      },
+    ],
   },
 ] as const;
 
+export const KNOWLEDGE_SOURCE_TIERS: DocketKnowledgeSourceTier[] = [
+  {
+    tier: 1,
+    title: "Primary authoritative ground truth",
+    description: "Must-have sources with the highest graph weight. If anything conflicts, these win.",
+    sourceIds: [
+      "irc-title-26",
+      "treasury-regulations-title-26",
+      "irs-direct-file-openfile-fact-graph",
+      "internal-revenue-bulletin",
+      "irs-forms-instructions-publications",
+    ],
+  },
+  {
+    tier: 2,
+    title: "Authoritative interpretation",
+    description: "Court, IRS written-determination, and state authority layers used to interpret and apply primary authority.",
+    sourceIds: [
+      "us-tax-court-opinions",
+      "federal-tax-court-decisions",
+      "irs-written-determinations",
+      "state-tax-authorities",
+    ],
+  },
+  {
+    tier: 3,
+    title: "Practitioner risk and enforcement",
+    description: "The Antonio/OPR name-and-shame layer. This powers compliance risk, not substantive tax-law conclusions.",
+    sourceIds: [
+      "opr-disciplinary-actions",
+      "irs-e-news-tax-professionals",
+      "doj-tax-division-press-releases",
+      "tigta-reports",
+    ],
+  },
+  {
+    tier: 4,
+    title: "Curated practitioner sources",
+    description: "Lower-cost, structured practitioner references and credentialed CE sources. Useful, but secondary.",
+    sourceIds: ["affordable-practitioner-sources"],
+  },
+  {
+    tier: 5,
+    title: "Community signal",
+    description: "Input signals only. These identify emerging questions and edge cases for human review before graph writes.",
+    sourceIds: ["credentialed-community-sources", "open-social-tax-signals"],
+  },
+  {
+    tier: 6,
+    title: "Premium licensed",
+    description: "Premium editorial research systems to license later when revenue supports it.",
+    sourceIds: ["premium-practitioner-research"],
+  },
+];
+
 export function getKnowledgeGraphSourceRegistry(): DocketKnowledgeSource[] {
   return [...KNOWLEDGE_GRAPH_SOURCE_REGISTRY].sort((a, b) => a.priority - b.priority);
+}
+
+export function getTieredKnowledgeSourceRegistry(): Array<DocketKnowledgeSourceTier & { sources: DocketKnowledgeSource[] }> {
+  const sourceById = new Map(getKnowledgeGraphSourceRegistry().map((source) => [source.id, source]));
+
+  return KNOWLEDGE_SOURCE_TIERS.map((tier) => ({
+    ...tier,
+    sources: tier.sourceIds.flatMap((sourceId) => {
+      const source = sourceById.get(sourceId);
+      return source ? [source] : [];
+    }),
+  }));
 }
 
 export function getKnowledgeSourcesByLayer(layer: KnowledgeGraphLayer): DocketKnowledgeSource[] {

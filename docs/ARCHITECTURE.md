@@ -39,19 +39,18 @@ The API exposes this control plane through:
 
 ## Tax Knowledge Source Hierarchy
 
-`@docket/tax-knowledge` owns the ranked source registry that determines which sources can support trusted tax conclusions and which sources are only risk or community signals.
+`@docket/tax-knowledge` owns the ranked source registry that determines which sources can support trusted tax conclusions and which sources are only risk or community signals. The registry is intentionally not one flat vector soup. Docket now exposes the same six-tier hierarchy in code and in the Knowledge Admin screen:
 
-The registry is intentionally not one flat vector soup. Docket separates sources into graph layers:
+1. **Primary authoritative ground truth**: Internal Revenue Code / 26 USC through OLRC, govinfo, law.gov-style structured access, and Cornell LII mirrors; Treasury Regulations / 26 CFR through eCFR and the eCFR API; IRS Direct File / OpenFile fact graph; IRS Internal Revenue Bulletin; and IRS forms, instructions, and publications.
+2. **Authoritative interpretation**: U.S. Tax Court opinions and ef-cms patterns, Federal tax court decisions through CourtListener/PACER/court channels, IRS Written Determinations including Chief Counsel Advice and PLRs, and state tax authorities such as California FTB and New York DTF.
+3. **Practitioner risk and enforcement**: IRS OPR Disciplinary Actions, OPR Final Agency Decisions, IRS e-News for Tax Professionals, DOJ Tax Division press releases, and TIGTA reports. This is the Antonio "name-and-shame" layer for compliance risk, not substantive tax conclusions.
+4. **Curated practitioner sources**: TheTaxBook, Parker Tax Publishing, Spidell, NATP, and NAEA materials. These are useful secondary practitioner references, but they do not outrank official sources.
+5. **Community signal**: TaxProTalk, r/taxpros, NAEA WebBoard, Drake Software Forum, TaxAct Pro Community, CSEA chapter networks, and TaxTwitter/X tags such as `#TaxTwitter` and `#EATax`. These only create candidate research tasks and must pass human review before anything reaches the graph.
+6. **Premium licensed**: Thomson Reuters Checkpoint, Bloomberg Tax, and CCH AnswerConnect for later licensed editorial research.
 
-- `TAX_AUTHORITY_GRAPH`: statute, regulations, Federal Register, IRB, IRS forms/instructions/publications, case law, written determinations, and state authorities.
-- `FILING_LOGIC_GRAPH`: IRS Direct File/OpenFile logic and IRS MeF schemas/business rules. These can block workflow readiness but do not independently establish substantive tax treatment.
-- `PREPARER_RISK_GRAPH`: Circular 230, OPR discipline, IRS e-News, DOJ Tax, IRS CI, TIGTA, and enforcement patterns. This powers professional-control gates and preparer-risk flags.
-- `PRACTITIONER_INTERPRETATION_LAYER`: licensed and curated practitioner analysis such as Checkpoint, Bloomberg Tax, CCH, TheTaxBook, Parker, Spidell, NATP, and NAEA.
-- `COMMUNITY_SIGNAL_LAYER`: TaxProTalk, r/taxpros, NAEA WebBoard, software forums, CSEA/community lists, and open social channels.
+Supplemental registry entries such as Federal Register/Treasury Decisions, IRS MeF schemas, the Internal Revenue Manual, Circular 230, and IRS Criminal Investigation releases remain available to Docket workflows, but the product-facing source hierarchy follows the six tiers above.
 
 Only sources marked `canSupportTrustedTaxConclusion` may support a trusted tax answer, and even those must match tax year, jurisdiction, effective date, freshness, and review status. Forums, newsletters, enforcement releases, and social sources never write directly into the authority graph. They create candidate research tasks and risk signals that require official-source backing and human review.
-
-The Antonio/OPR "name-and-shame" source lives in the `PREPARER_RISK_GRAPH` as IRS OPR Disciplinary Actions. It is high-value for compliance and model-risk controls, but it is not substantive tax-law authority.
 
 ## Persistence
 

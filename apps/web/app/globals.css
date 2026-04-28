@@ -440,11 +440,37 @@ main {
   margin-top: 4px;
 }
 
+.source-tier-list {
+  display: grid;
+  gap: 16px;
+}
+
+.source-tier-card {
+  gap: 12px;
+}
+
 .source-rank-row {
   display: grid;
   gap: 3px;
   padding: 10px 0;
   border-top: 1px solid var(--line);
+}
+
+.source-detail-row {
+  gap: 8px;
+}
+
+.source-detail-row p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.source-detail-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .source-rank-row strong {
@@ -455,6 +481,26 @@ main {
   color: var(--muted);
   font-size: 12px;
   text-transform: lowercase;
+}
+
+.included-source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.included-source-chip {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 5px 8px;
+  text-decoration: none;
+}
+
+.included-source-chip:hover {
+  border-color: var(--accent);
+  color: var(--ink);
 }
 
 .answer {

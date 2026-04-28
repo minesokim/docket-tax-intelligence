@@ -1,56 +1,46 @@
 import { getKnowledgeAdmin } from "@docket/domain";
-import { getKnowledgeGraphSourceRegistry } from "@docket/tax-knowledge";
+import { getTieredKnowledgeSourceRegistry } from "@docket/tax-knowledge";
 
 import { AuthorityBadge, PageHeader, Section, StatusBadge } from "../../../src/components/docket-ui";
 
 export default function KnowledgePage() {
   const knowledge = getKnowledgeAdmin();
-  const sourceRegistry = getKnowledgeGraphSourceRegistry();
-  const topSources = sourceRegistry.slice(0, 10);
-  const riskSources = sourceRegistry.filter((source) => source.graphLayer === "PREPARER_RISK_GRAPH");
-  const signalSources = sourceRegistry.filter((source) => source.graphLayer === "COMMUNITY_SIGNAL_LAYER");
+  const sourceTiers = getTieredKnowledgeSourceRegistry();
 
   return (
     <>
       <PageHeader eyebrow="Tax Knowledge Engine" title="Current authority, source syncs, snapshots, and rule packages" />
       <Section title="Docket source hierarchy">
-        <div className="split-list">
-          <div className="item-card">
-            <div className="item-card-title">
-              <h3>Trusted tax conclusion sources</h3>
-              <StatusBadge label={`${sourceRegistry.filter((source) => source.canSupportTrustedTaxConclusion).length} sources`} tone="green" />
+        <div className="source-tier-list">
+          {sourceTiers.map((tier) => (
+            <div className="item-card source-tier-card" key={tier.tier}>
+              <div className="item-card-title">
+                <h3>Tier {tier.tier}: {tier.title}</h3>
+                <StatusBadge label={`${tier.sources.length} source groups`} tone={tier.tier <= 2 ? "green" : tier.tier === 3 ? "yellow" : "blue"} />
+              </div>
+              <p>{tier.description}</p>
+              <div className="source-rank-list">
+                {tier.sources.map((source) => (
+                  <div className="source-rank-row source-detail-row" key={source.id}>
+                    <div className="source-detail-header">
+                      <strong>{source.name}</strong>
+                      <span>weight {source.authorityWeight} · {source.authorityRole.replaceAll("_", " ").toLowerCase()}</span>
+                    </div>
+                    <p>{source.notes}</p>
+                    {source.includedSources ? (
+                      <div className="included-source-list" aria-label={`${source.name} included sources`}>
+                        {source.includedSources.map((includedSource) => (
+                          <a className="included-source-chip" href={includedSource.sourceUrl} key={includedSource.id}>
+                            {includedSource.name}
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             </div>
-            <p>
-              These sources can support a trusted tax conclusion when the tax year, jurisdiction, effective date, and source freshness match. Lower-tier
-              sources never override higher authority.
-            </p>
-            <div className="source-rank-list">
-              {topSources.map((source) => (
-                <div className="source-rank-row" key={source.id}>
-                  <strong>{source.priority}. {source.name}</strong>
-                  <span>{source.graphLayer.replaceAll("_", " ")} · weight {source.authorityWeight}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="item-card">
-            <div className="item-card-title">
-              <h3>Risk and signal layers</h3>
-              <StatusBadge label="Human review required" tone="yellow" />
-            </div>
-            <p>
-              OPR discipline, DOJ, TIGTA, and practitioner communities are not tax-law authority. They create compliance patterns, review gates,
-              risk alerts, and candidate research tasks.
-            </p>
-            <div className="source-rank-list">
-              {[...riskSources, ...signalSources].map((source) => (
-                <div className="source-rank-row" key={source.id}>
-                  <strong>{source.priority}. {source.name}</strong>
-                  <span>{source.authorityRole.replaceAll("_", " ")} · {source.ingestionPriority.toLowerCase()}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          ))}
         </div>
       </Section>
       <Section title="Knowledge snapshots">
