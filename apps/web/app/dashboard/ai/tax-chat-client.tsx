@@ -154,7 +154,7 @@ function sourceBuckets(response: TaxChatResponse) {
     const type = sourceIndex[id]?.type.toLowerCase() ?? "";
     if (type.includes("authority") || type.includes("irs") || type.includes("congress") || type.includes("govinfo") || type.includes("federal") || type.includes("ecfr") || id.startsWith("cite-")) bucketed.authority.push(id);
     else if (type.includes("conversation") || type.includes("client claim")) bucketed.conversation.push(id);
-    else if (type.includes("document") || type.includes("tax fact") || type.includes("client question") || type.includes("workpaper")) bucketed.clientFile.push(id);
+    else if (type.includes("client") || type.includes("document") || type.includes("tax fact") || type.includes("client question") || type.includes("workpaper")) bucketed.clientFile.push(id);
     else bucketed.knowledgeGraph.push(id);
   }
 
@@ -254,6 +254,7 @@ function ReasoningTrace({ analysis }: { analysis: MemoIssue }) {
 function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate: boolean }) {
   const { answer, sourceIndex } = response;
   const isResearch = answer.mode === "general-research";
+  const isPortfolio = answer.mode === "firm-portfolio";
   const artifactMemo = answer.artifacts?.memo;
   const packetById = new Map((answer.artifacts?.sourcePacket ?? []).map((packet) => [packet.id, packet]));
   const issuePacketByIssueId = new Map((answer.artifacts?.issuePackets ?? []).map((packet) => [packet.issueId, packet]));
@@ -270,7 +271,7 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
   const preparerQueue = answer.actionQueues?.preparerFacing ?? analyses.flatMap((analysis) => analysis.preparerWorkPlan);
   const verdict = artifactMemo?.verdict ?? answer.verdict;
   const title = artifactMemo?.headline ?? answer.headline;
-  const documentKind = isResearch ? "Research memo" : "Client memo";
+  const documentKind = isPortfolio ? "Portfolio memo" : isResearch ? "Research memo" : "Client memo";
   const metadataLine = issueCount > 0
     ? `${documentKind} · Generated just now · Reasoning: ${issueCount} issue${issueCount === 1 ? "" : "s"} analyzed · Sources linked inline`
     : `${documentKind} · Generated just now · Authority packet: ${answer.retrievedAuthority?.sources.length ?? 0} source${(answer.retrievedAuthority?.sources.length ?? 0) === 1 ? "" : "s"} · Sources linked inline`;
@@ -280,7 +281,7 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
       <div className="chat-avatar">AI</div>
       <div className="memo-workspace">
         <div className="memo-document">
-          <div className="memo-breadcrumb">{isResearch ? "Research / General tax authority" : `Clients / ${response.contextLabel ?? "Selected return"}`}</div>
+          <div className="memo-breadcrumb">{isPortfolio ? "Firm / Portfolio intelligence" : isResearch ? "Research / General tax authority" : `Clients / ${response.contextLabel ?? "Selected return"}`}</div>
           <header className="memo-header">
             <h2>{title}</h2>
             <p>{metadataLine}</p>
@@ -295,7 +296,7 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
             </div>
           ) : (
             <div className="memo-badges">
-              <span className={isResearch ? "warning" : "success"}>{isResearch ? "Research mode" : "Client-file mode"}</span>
+              <span className={isResearch || isPortfolio ? "warning" : "success"}>{isPortfolio ? "Portfolio mode" : isResearch ? "Research mode" : "Client-file mode"}</span>
               <span>{answer.synthesizedBy ?? "deterministic retrieval"}</span>
               {answer.retrievedAuthority ? <span>{answer.retrievedAuthority.sources.filter((source) => source.fetchStatus === "LIVE").length} live source(s)</span> : null}
             </div>
@@ -360,7 +361,13 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
               ) : null}
               <div>
                 <h3>Reasoning summary</h3>
-                <ul>{answer.reasoningSummary.map((item) => <li key={item}>{item}</li>)}</ul>
+                <ul>{answer.reasoningSummary.slice(0, 2).map((item) => <li key={item}>{item}</li>)}</ul>
+                {answer.reasoningSummary.length > 2 ? (
+                  <details className="reasoning-trace compact-trace">
+                    <summary>Show full reasoning trace</summary>
+                    <ol>{answer.reasoningSummary.slice(2).map((item) => <li key={item}>{item}</li>)}</ol>
+                  </details>
+                ) : null}
               </div>
               <div>
                 <h3>Next steps</h3>
@@ -452,7 +459,7 @@ function AssistantAnswer({ response, animate }: { response: TaxChatResponse; ani
   const animatedBody = useTypewriter(answer.answer.join("\n\n"), animate);
   const bodyParagraphs = animatedBody.split("\n\n").filter(Boolean);
 
-  if (answer.mode === "client-return" || answer.mode === "general-research") {
+  if (answer.mode === "client-return" || answer.mode === "general-research" || answer.mode === "firm-portfolio") {
     return <MemoAnswer response={response} animate={animate} />;
   }
 
@@ -607,6 +614,8 @@ export function TaxChatClient({ initialQuestion, initialReturnId }: { initialQue
     () => [...messages].reverse().find((message) => message.role === "assistant")?.response?.answer as ChatAnswer | undefined,
     [messages],
   );
+  const modeLabel = latestAnswer?.mode === "firm-portfolio" ? "Portfolio mode" : returnId ? "Client mode" : "Research mode";
+  const modeTone = latestAnswer?.mode === "firm-portfolio" ? "blue" : returnId ? "green" : "neutral";
 
   function buildHistorySnapshot(currentMessages: Message[]): ChatHistoryTurn[] {
     return currentMessages
@@ -705,7 +714,8 @@ export function TaxChatClient({ initialQuestion, initialReturnId }: { initialQue
           </div>
           <div className="pill-row">
             <StatusBadge label={latestAnswer?.synthesizedBy ?? "ready"} tone={latestAnswer?.synthesizedBy ? "green" : "blue"} />
-            <StatusBadge label={returnId ? "Client context on" : "No client selected"} tone={returnId ? "green" : "neutral"} />
+            <StatusBadge label={modeLabel} tone={modeTone} />
+            <StatusBadge label={returnId ? "Client context on" : "Firm roster available"} tone={returnId ? "green" : "blue"} />
           </div>
         </div>
 

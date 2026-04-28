@@ -116,10 +116,15 @@ function isAmbiguousResearchFollowup(question: string): boolean {
   return /\b(this|that|these|those|it|they|affect|impact|clients|client|them)\b/.test(normalized) && meaningfulTokens.length <= 2;
 }
 
+function isPortfolioClientQuestion(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  return /\b(which|what|who|name|names|list|show|identify)\b/.test(normalized) && /\b(my|our|firm|book|client|clients|roster)\b/.test(normalized);
+}
+
 export function researchRetrievalQuery(question: string, history: ChatHistoryTurn[]): string {
   const directTopic = activeResearchTopicFromText(question);
   if (directTopic) return question;
-  if (!isAmbiguousResearchFollowup(question)) return question;
+  if (!isAmbiguousResearchFollowup(question) && !isPortfolioClientQuestion(question)) return question;
 
   const recentTopic = [...history]
     .reverse()
@@ -538,6 +543,131 @@ function buildClientStatusAnswer(workbench: WorkbenchView | null): ChatAnswer {
   };
 }
 
+type PortfolioCandidate = {
+  clientId: string;
+  returnId: string | null;
+  name: string;
+  priority: "HIGH" | "MEDIUM" | "MONITOR";
+  reasons: string[];
+  evidenceLabels: string[];
+};
+
+function buildPortfolioCandidateList(): PortfolioCandidate[] {
+  const data = readDocketData();
+  return data.clients
+    .map((client) => {
+      const taxReturn = data.taxReturns.find((returnRecord) => returnRecord.clientId === client.id) ?? null;
+      const documents = data.sourceDocuments.filter((document) => document.clientId === client.id);
+      const issues = data.taxIssues.filter((issue) => issue.clientId === client.id);
+      const tags = client.tags.map((tag) => tag.toLowerCase());
+      const documentClasses = new Set(documents.map((document) => document.documentClass));
+      const reasons: string[] = [];
+      const evidenceLabels = [`Client profile: ${client.tags.join(", ")}`];
+
+      if (tags.includes("retired") || documentClasses.has("FORM_1099_R")) {
+        reasons.push("Senior/retirement-income screen: possible Enhanced Senior Deduction and MAGI documentation review.");
+        evidenceLabels.push(...documents.filter((document) => document.documentClass === "FORM_1099_R" || document.documentClass === "FORM_1099_INT").map((document) => document.fileName));
+      }
+
+      if (tags.includes("schedule c") || taxReturn?.returnType.toLowerCase().includes("schedule c") || documentClasses.has("FORM_1099_NEC") || documentClasses.has("FORM_1099_K")) {
+        reasons.push("Schedule C/self-employed screen: review OBBBA business/worker provisions, reporting transition relief, and client organizer updates.");
+        evidenceLabels.push(...documents.filter((document) => ["FORM_1099_NEC", "FORM_1099_K", "BUSINESS_EXPENSE_SUMMARY"].includes(document.documentClass)).map((document) => document.fileName));
+      }
+
+      if (tags.includes("marketplace insurance") || documentClasses.has("FORM_1095_A")) {
+        reasons.push("Healthcare/ACA screen: OBBBA healthcare provisions require separate source review before client-facing advice.");
+        evidenceLabels.push(...documents.filter((document) => document.documentClass === "FORM_1095_A").map((document) => document.fileName));
+      }
+
+      if (tags.some((tag) => tag.includes("k-1")) || documentClasses.has("SCHEDULE_K1") || taxReturn?.returnType.toLowerCase().includes("rental")) {
+        reasons.push("Pass-through/rental/business screen: provision-by-provision business impact review needed; do not automate basis/passive conclusions.");
+        evidenceLabels.push(...documents.filter((document) => document.documentClass === "SCHEDULE_K1" || document.documentClass === "FORM_1098").map((document) => document.fileName));
+      }
+
+      if (tags.includes("dependent") || tags.includes("childcare") || documentClasses.has("FORM_1098_T") || documentClasses.has("DEPENDENT_CARE_STATEMENT")) {
+        reasons.push("Family/dependent screen: monitor family/dependent provisions and update organizer questions before planning outreach.");
+        evidenceLabels.push(...documents.filter((document) => document.documentClass === "FORM_1098_T" || document.documentClass === "DEPENDENT_CARE_STATEMENT").map((document) => document.fileName));
+      }
+
+      if (issues.some((issue) => issue.riskLevel === "RED")) {
+        reasons.push("Open red issue already exists, so any OBBBA outreach should be reviewer-controlled.");
+      }
+
+      const priority: PortfolioCandidate["priority"] = reasons.some((reason) => reason.includes("Senior") || reason.includes("Schedule C") || reason.includes("Healthcare") || reason.includes("Pass-through"))
+        ? issues.some((issue) => issue.riskLevel === "RED") || reasons.some((reason) => reason.includes("Senior"))
+          ? "HIGH"
+          : "MEDIUM"
+        : reasons.length > 0
+          ? "MONITOR"
+          : "MONITOR";
+
+      return {
+        clientId: client.id,
+        returnId: taxReturn?.id ?? null,
+        name: client.displayName,
+        priority,
+        reasons,
+        evidenceLabels: Array.from(new Set(evidenceLabels)).slice(0, 6),
+      };
+    })
+    .filter((candidate) => candidate.reasons.length > 0)
+    .sort((a, b) => {
+      const rank = { HIGH: 0, MEDIUM: 1, MONITOR: 2 };
+      return rank[a.priority] - rank[b.priority] || a.name.localeCompare(b.name);
+    });
+}
+
+async function buildPortfolioImpactAnswer(_question: string, retrievalQuestion: string): Promise<ChatAnswer> {
+  const topic = activeResearchTopicFromText(retrievalQuestion);
+  const candidates = buildPortfolioCandidateList();
+  const topCandidates = candidates.slice(0, 6);
+  const research = topic ? await retrieveOfficialAuthority(retrievalQuestion) : undefined;
+  const sourceIds = topCandidates.map((candidate) => candidate.clientId);
+
+  if (!topic) {
+    return {
+      mode: "firm-portfolio",
+      headline: "I need an active tax topic before naming affected clients.",
+      answer: [
+        "This is a portfolio-intelligence question, not a general research question. I can scan the firm roster, but I need the tax topic to screen against first.",
+        "Ask it after a topic-specific research turn, for example: 'Which clients are affected by OBBBA?' or 'Which clients are affected by the home office issue?'",
+      ],
+      reasoningSummary: ["Blocked client-name generation because no tax topic was anchored in the prompt or recent chat history."],
+      nextSteps: ["Name the tax topic, then ask for affected clients again.", "Use a selected return if you want a single-client answer."],
+      sourceIds: [],
+      citationIds: [],
+      suggestedFollowups: ["Which clients are affected by OBBBA?", "Which clients need an OBBBA review?", "Show the OBBBA client screening matrix."],
+    };
+  }
+
+  const answer: ChatAnswer = {
+    mode: "firm-portfolio",
+    headline: `Named OBBBA screening candidates from the current Docket client roster.`,
+    answer: [
+      "Yes. I can name screening candidates from the current Docket roster, but these are not eligibility determinations. They are clients who should be routed into an OBBBA review queue based on existing client facts, documents, issues, and tags.",
+      ...topCandidates.map((candidate) => `${candidate.priority}: ${candidate.name} — ${candidate.reasons.join(" ")} Evidence: ${candidate.evidenceLabels.join("; ")}.`),
+      "No client should receive a client-facing OBBBA number from this screen alone. The next step is provision-level review against PL 119-21, current IRS implementation guidance, the client's tax year, state conformity, and actual source documents.",
+    ],
+    reasoningSummary: [
+      "Classified the prompt as firm portfolio intelligence because it asks for named clients, not another authority memo.",
+      `Used the active research topic '${topic}' from the conversation before screening the roster.`,
+      "Screened client tags, return type, source-document classes, and open issue severity; did not invent eligibility facts that are not in the Docket file.",
+      "Retrieved OBBBA authority only to preserve the governing topic; client names came from Docket client records, not from the model.",
+    ],
+    nextSteps: [
+      "Create an OBBBA review queue for the named clients and assign a reviewer before client outreach.",
+      "For each candidate, attach the provision being screened, the client evidence, the missing facts, and the authority source.",
+      "Add intake questions for tipped occupation, auto-loan origination/interest, senior MAGI support, clean-energy placed-in-service facts, and state conformity.",
+    ],
+    sourceIds,
+    citationIds: [],
+    suggestedFollowups: ["Show this as a screening table.", "Draft reviewer tasks for these clients.", "Which one is highest risk?", "Create client questions for the top candidates."],
+    limitation: "Portfolio screening is not a tax conclusion. It identifies clients who need provision-level review.",
+  };
+  if (research) answer.retrievedAuthority = research;
+  return answer;
+}
+
 async function buildGroundedAnswer(question: string, output: ReasoningOutputView | null, hasClientContext: boolean, workbench: WorkbenchView | null, retrievalQuestion = question): Promise<ChatAnswer> {
   const q = question.toLowerCase();
   const clientName = workbench?.client?.displayName ?? "the selected client";
@@ -582,6 +712,9 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
   }
 
   if (!hasClientContext) {
+    if (isPortfolioClientQuestion(question)) {
+      return buildPortfolioImpactAnswer(question, retrievalQuestion);
+    }
     const research = await retrieveOfficialAuthority(retrievalQuestion);
     return {
       mode: "general-research",
@@ -803,6 +936,25 @@ function buildResearchSourceIndex(answer: ChatAnswer): Record<string, SourceInde
   return entries;
 }
 
+function buildPortfolioSourceIndex(answer: ChatAnswer): Record<string, SourceIndexEntry> {
+  if (answer.mode !== "firm-portfolio") return {};
+  const data = readDocketData();
+  const entries: Record<string, SourceIndexEntry> = {};
+  for (const sourceId of answer.sourceIds) {
+    const client = data.clients.find((item) => item.id === sourceId);
+    if (client) {
+      const taxReturn = data.taxReturns.find((returnRecord) => returnRecord.clientId === client.id);
+      entries[sourceId] = {
+        id: sourceId,
+        type: "Client roster",
+        label: client.displayName,
+        detail: `${taxReturn?.taxYear ?? "Current"} ${taxReturn?.returnType ?? "return"} · tags: ${client.tags.join(", ")}`,
+      };
+    }
+  }
+  return entries;
+}
+
 function maybeSynthesizeWithClaude(
   question: string,
   answer: ChatAnswer,
@@ -811,6 +963,7 @@ function maybeSynthesizeWithClaude(
   conversationHistory: ChatHistoryTurn[],
 ): ChatAnswer {
   if (!question.trim() || isCasualMessage(question)) return answer;
+  if (answer.mode === "firm-portfolio") return answer;
   const draftAnswer = {
     headline: answer.headline,
     answer: answer.answer,
@@ -858,6 +1011,7 @@ export async function buildTaxChatResponse(question: string, returnId?: string, 
   }
   const draftAnswer = await buildGroundedAnswer(question, output, hasClientContext, workbench, retrievalQuestion);
   sourceIndex = { ...sourceIndex, ...buildResearchSourceIndex(draftAnswer) };
+  sourceIndex = { ...sourceIndex, ...buildPortfolioSourceIndex(draftAnswer) };
   if (workbench) {
     draftAnswer.artifacts = runTaxChatOrchestrator({
       question,

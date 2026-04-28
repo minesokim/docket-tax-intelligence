@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { rankAuthorityCatalog } from "@docket/tax-knowledge";
 
+import { buildTaxChatResponse } from "./tax-chat";
 import { researchRetrievalQuery } from "./tax-chat";
 
 describe("tax research authority ranking", () => {
@@ -39,4 +40,17 @@ describe("tax research authority ranking", () => {
     expect(rankedIds).toContain("congress-pl119-21-obbba");
     expect(rankedIds.some((id) => id.toLowerCase().includes("tcja"))).toBe(false);
   });
+
+  it("routes named-client impact questions into firm portfolio screening instead of random IRS fallback", async () => {
+    const response = await buildTaxChatResponse("which of my clients are affected specifically by it? can you give a name?", undefined, [
+      { role: "assistant", content: "OBBBA Public Law 119-21 changed several 2025 deductions and credits." },
+    ]);
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.answer.answer.join("\n")).toContain("Nora Williams");
+    expect(response.answer.sourceIds).toContain("client-nora-williams");
+    expect(response.sourceIndex["client-nora-williams"]?.type).toBe("Client roster");
+    expect(response.answer.retrievedAuthority?.sources.map((source) => source.id)).toContain("congress-pl119-21-obbba");
+    expect(response.answer.retrievedAuthority?.sources.map((source) => source.title).join(" ")).not.toMatch(/403b|1120-L|Name After Marriage/i);
+  }, 15_000);
 });

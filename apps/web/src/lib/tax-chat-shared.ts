@@ -14,7 +14,7 @@ export type SourceIndexEntry = {
 };
 
 export type ChatAnswer = {
-  mode: "client-return" | "general-research";
+  mode: "client-return" | "general-research" | "firm-portfolio";
   headline: string;
   answer: string[];
   verdict?: {
