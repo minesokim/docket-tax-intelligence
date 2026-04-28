@@ -14,6 +14,26 @@ export function getCommandCenter(data: DocketData = readDocketData()) {
   const needsQuestions = data.clientClarifications.filter((question) => question.status === "AWAITING_CLIENT");
   const likelyExtensions = returns.filter((taxReturn) => taxReturn.extensionRiskScore >= 75);
   const aiPreparedAwaitingReview = data.aiPrepRuns.filter((run) => run.status === "COMPLETE").length;
+  const issueCount = (issueType: string) => data.taxIssues.filter((issue) => issue.issueType === issueType && issue.status !== "RESOLVED").length;
+  const missingDocumentCount = (documentClass: string) =>
+    data.missingDocuments.filter((document) => document.expectedDocumentClass === documentClass && document.status !== "RECEIVED").length;
+  const unsupportedScheduleCOpportunities = data.deductionOpportunities.filter(
+    (opportunity) =>
+      opportunity.taxReturnId &&
+      opportunity.status !== "APPROVED" &&
+      (opportunity.opportunityType === "HOME_OFFICE" || opportunity.opportunityType === "BUSINESS_MILEAGE"),
+  ).length;
+  const recurringDocsMissing = data.priorYearPatterns.filter(
+    (pattern) => pattern.expectedCurrentYearDocumentClass && pattern.resolvedByDocumentId === null,
+  ).length;
+  const computedFindings = [
+    { count: issueCount("INCOME_RECONCILIATION"), label: "income mismatch issue(s) across active returns" },
+    { count: likelyExtensions.length, label: "return(s) likely needing extension" },
+    { count: recurringDocsMissing, label: "missing prior-year recurring document(s)" },
+    { count: unsupportedScheduleCOpportunities, label: "Schedule C opportunity item(s) needing support" },
+    { count: missingDocumentCount("FORM_1099_B"), label: "stock-sale signal(s) with no 1099-B received" },
+    { count: missingDocumentCount("FORM_1095_A"), label: "marketplace insurance signal(s) with no 1095-A received" },
+  ].filter((finding) => finding.count > 0);
 
   return {
     firm: data.firms[0],
@@ -30,14 +50,10 @@ export function getCommandCenter(data: DocketData = readDocketData()) {
       { label: "Revenue blocked by signature/payment", value: data.signatureAuthorizations.filter((signature) => signature.status !== "SIGNED").length, tone: "yellow" },
       { label: "Reviewer workload", value: data.taxIssues.filter((issue) => issue.assignedToRole === "MANAGER_REVIEWER" && issue.status !== "RESOLVED").length, tone: "blue" },
     ],
-    findings: [
-      "5 income mismatches across active returns",
-      "12 likely extensions",
-      "18 missing prior-year recurring documents",
-      "7 unsupported Schedule C deduction items",
-      "4 stock-sale mentions with no 1099-B",
-      "3 marketplace insurance mentions with no 1095-A",
-    ],
+    findings:
+      computedFindings.length > 0
+        ? computedFindings.map((finding) => `${finding.count} ${finding.label}`)
+        : ["No active computed findings. Monitor source syncs, client messages, and document ingestion."],
     activeReturns: returns.map((taxReturn) => ({
       ...taxReturn,
       client: data.clients.find((client) => client.id === taxReturn.clientId),

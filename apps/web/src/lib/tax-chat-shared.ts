@@ -15,6 +15,17 @@ export type ChatAnswer = {
   mode: "client-return" | "general-research";
   headline: string;
   answer: string[];
+  verdict?: {
+    filingStatus: string;
+    blockerCount: number;
+    readinessScore: number;
+    extensionRiskScore: number;
+    readinessMeaning: string;
+  };
+  actionQueues?: {
+    clientFacing: string[];
+    preparerFacing: string[];
+  };
   reasoningSummary: string[];
   nextSteps: string[];
   professionalAnalyses?: ProfessionalAnalysisView[];
@@ -29,11 +40,14 @@ export type ChatAnswer = {
 export type ProfessionalAnalysisView = {
   issueId: string;
   title: string;
+  priority: number;
+  statusLabel: string;
   situationMode: string;
   context: string;
   factPatternSummary: string;
   ruleSpace: string[];
   smellTests: string[];
+  dollarExposure: string;
   professionalJudgment: string;
   establishedFacts: string[];
   clientClaims: string[];
@@ -45,6 +59,8 @@ export type ProfessionalAnalysisView = {
   reviewerChecklist: string[];
   clearanceStandard: string;
   clientQuestionStrategy: string;
+  clientCommunicationDraft: string;
+  preparerWorkPlan: string[];
   sourceIds: string[];
   citationIds: string[];
 };

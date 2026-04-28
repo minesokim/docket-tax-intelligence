@@ -289,7 +289,7 @@ describe("Docket tax intelligence engines", () => {
         expect.objectContaining({
           issueId: "issue-income-mismatch",
           situationMode: expect.stringContaining("Schedule C"),
-          smellTests: expect.arrayContaining(["Client used a round-number estimate."]),
+          smellTests: expect.arrayContaining(["Client claim is a round-number $85,000 estimate."]),
           assumptionsToAvoid: expect.arrayContaining(["Do not assume the 1099-K is incremental income."]),
           clearanceStandard: expect.stringContaining("gross receipts"),
         }),

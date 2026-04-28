@@ -629,35 +629,42 @@ export function generateClientQuestions(inputData: DocketData, returnId: string)
   const consentBlock = workflowConsentBlock(data, returnId, "client_question_generation");
   if (consentBlock) return consentBlock;
 
-  const questions: ClientClarification[] = [
-    {
-      id: "clar-1099k-overlap",
-      clientId: IDS.client,
+  const taxReturn = findReturn(data, returnId);
+  const questionForIssue = (issue: (typeof data.taxIssues)[number]): string => {
+    const facts = data.taxFacts.filter((fact) => issue.sourceIds.includes(fact.id));
+    const factAmount = (factId: string) => facts.find((fact) => fact.id === factId)?.value;
+    switch (issue.issueType) {
+      case "INCOME_RECONCILIATION":
+      case "FORM_1099K_OVERLAP":
+        return `Your organizer says about $85,000 of freelance income. We also have Bluepeak 1099-NEC ${factAmount("fact-nec-income") ?? "$42,000"} and Stripe 1099-K ${factAmount("fact-1099k-income") ?? "$63,000"}. Did Bluepeak pay you through Stripe, or are those separate receipts?`;
+      case "MISSING_1099_B":
+        return "Which brokerage account did you use for the Tesla sale, and can you upload the 2024 consolidated 1099 or transaction statement?";
+      case "STATE_RESIDENCY":
+        return "What was your exact move date from California to Texas, and did you work any days in California after that date?";
+      case "HOME_OFFICE_SUBSTANTIATION":
+        return "Was the home office room used exclusively and regularly for business during 2024, or did guests/family use it personally at any time?";
+      case "MILEAGE_SUBSTANTIATION":
+        return "Can you upload the full-year mileage log showing date, destination, miles, and business purpose for each business trip?";
+      default:
+        return issue.recommendedAction;
+    }
+  };
+
+  const questions: ClientClarification[] = data.taxIssues
+    .filter((issue) => issue.taxReturnId === returnId && issue.status !== "RESOLVED" && issue.status !== "WAIVED_BY_REVIEWER")
+    .map((issue) => ({
+      id: `clar-${slug(issue.id.replace(/^issue-/, ""))}`,
+      clientId: taxReturn.clientId,
       taxReturnId: returnId,
-      relatedIssueId: "issue-income-mismatch",
-      question:
-        "Does the Stripe 1099-K include payments already reported on the Bluepeak 1099-NEC, or are these separate receipts?",
+      relatedIssueId: issue.id,
+      question: questionForIssue(issue),
       generatedByAiRunId: "airun-client-questions",
-      status: "APPROVED_TO_SEND",
+      status: "APPROVED_TO_SEND" as const,
       answer: null,
       answeredAt: null,
       reviewerApproved: true,
       evidenceRefs: [],
-    },
-    {
-      id: "clar-1099b-brokerage",
-      clientId: IDS.client,
-      taxReturnId: returnId,
-      relatedIssueId: "issue-missing-1099-b",
-      question: "Which brokerage account did you use for the Tesla sale, and can you upload the 2024 consolidated 1099?",
-      generatedByAiRunId: "airun-client-questions",
-      status: "APPROVED_TO_SEND",
-      answer: null,
-      answeredAt: null,
-      reviewerApproved: true,
-      evidenceRefs: [],
-    },
-  ];
+    }));
 
   for (const question of questions) {
     if (!data.clientClarifications.some((item) => item.id === question.id)) {
@@ -1267,9 +1274,11 @@ export function unsupportedScopeResponse(scope: string) {
 }
 
 type IssuePlaybook = {
+  priority: number;
   situationMode: string;
   ruleSpace: string[];
   smellTests: string[];
+  dollarExposure: string;
   professionalJudgment: string;
   assumptionsToAvoid: string[];
   diligenceDuties: string[];
@@ -1277,12 +1286,16 @@ type IssuePlaybook = {
   reviewerChecklist: string[];
   clearanceStandard: string;
   clientQuestionStrategy: string;
+  clientCommunicationDraft: string;
+  preparerWorkPlan: string[];
 };
 
 const DEFAULT_ISSUE_PLAYBOOK: IssuePlaybook = {
+  priority: 90,
   situationMode: "Reviewer judgment",
-  ruleSpace: ["Client fact graph", "Evidence requirements", "Firm review policy"],
+  ruleSpace: ["Applicable form instructions", "Evidence requirements", "Firm review policy"],
   smellTests: ["Material issue is not fully supported yet."],
+  dollarExposure: "Not estimated yet; reviewer must scope materiality from the supporting facts.",
   professionalJudgment: "Treat this as a preparer judgment item until the source file, client facts, and reviewer approval support clearance.",
   assumptionsToAvoid: ["Do not infer missing facts from prior-year patterns.", "Do not treat AI wording as evidence."],
   diligenceDuties: [
@@ -1294,17 +1307,26 @@ const DEFAULT_ISSUE_PLAYBOOK: IssuePlaybook = {
   reviewerChecklist: ["Confirm source evidence.", "Confirm tax-year and jurisdiction match.", "Document reviewer judgment before clearance."],
   clearanceStandard: "Clear only after the missing facts are documented, citations are current, and the assigned reviewer approves the position.",
   clientQuestionStrategy: "Ask a narrow factual question that can be answered with a document, date, amount, or yes/no confirmation.",
+  clientCommunicationDraft: "Please send the missing support for this item so we can finish review.",
+  preparerWorkPlan: ["Gather source support.", "Document the conclusion.", "Route to reviewer."],
 };
 
 const ISSUE_PLAYBOOKS: Record<string, IssuePlaybook> = {
   INCOME_RECONCILIATION: {
+    priority: 10,
     situationMode: "Returning Schedule C client with year-over-year and third-party income mismatch",
-    ruleSpace: ["Schedule C gross receipts", "1099-NEC reporting", "1099-K processor reporting", "Prior-year comparison"],
-    smellTests: [
-      "Client used a round-number estimate.",
-      "1099-NEC plus 1099-K exceeds the client claim.",
-      "Prior-year Schedule C gross receipts create an expected pattern to compare.",
+    ruleSpace: [
+      "Schedule C gross receipts reporting",
+      "1099-NEC nonemployee compensation reporting",
+      "1099-K payment settlement reporting",
+      "Prior-year Schedule C variance review",
     ],
+    smellTests: [
+      "Client claim is a round-number $85,000 estimate.",
+      "Bluepeak 1099-NEC is $42,000 and Stripe 1099-K is $63,000; additive total is $105,000.",
+      "The additive total exceeds the client claim by $20,000 and could still be wrong if Stripe includes Bluepeak payments.",
+    ],
+    dollarExposure: "$20,000 unexplained variance versus the client estimate; up to $42,000 possible double-count exposure if Bluepeak was paid through Stripe.",
     professionalJudgment:
       "Block Schedule C gross receipts until the preparer reconciles client-stated receipts to source documents and any payment-processor overlap.",
     assumptionsToAvoid: [
@@ -1329,11 +1351,25 @@ const ISSUE_PLAYBOOKS: Record<string, IssuePlaybook> = {
       "Clear only when 1099-K/1099-NEC overlap is documented, total receipts reconcile, and the reviewer accepts the final gross receipts fact.",
     clientQuestionStrategy:
       "Ask whether Stripe includes payments also reported by Bluepeak, then request processor detail or bookkeeping support.",
+    clientCommunicationDraft:
+      "Miguel, we have a Bluepeak 1099-NEC for $42,000 and a Stripe 1099-K for $63,000, but your organizer says about $85,000 of freelance income. Did Bluepeak pay you through Stripe, or are the Stripe payments separate? Please upload Stripe payout detail or a 2024 income ledger.",
+    preparerWorkPlan: [
+      "Pull Bluepeak 1099-NEC Box 1 and Stripe 1099-K gross amount into the gross receipts workpaper.",
+      "Match Stripe payout dates/customers against Bluepeak invoice/payment dates.",
+      "Document whether gross receipts are $105,000, $63,000 plus non-Stripe receipts, or another supported amount.",
+      "Route final Schedule C gross receipts to reviewer before clearing filing readiness.",
+    ],
   },
   FORM_1099K_OVERLAP: {
+    priority: 20,
     situationMode: "Payment-processor reconciliation",
     ruleSpace: ["Schedule C gross receipts", "1099-K processor detail", "Payer-level income tracing"],
-    smellTests: ["Same payer may appear in processor and nonemployee compensation reporting.", "Processor gross amount may not equal taxable gross receipts workpaper."],
+    smellTests: [
+      "Stripe gross receipts are $63,000 while Bluepeak 1099-NEC is $42,000.",
+      "If Bluepeak paid via Stripe, counting both forms at face value double-counts the same receipts.",
+      "If Bluepeak paid outside Stripe, excluding the 1099-NEC understates income.",
+    ],
+    dollarExposure: "$42,000 potential double-count or omission depending on payer/payment-channel mapping.",
     professionalJudgment: "Treat processor overlap as unresolved until the firm can map payer-level receipts to the 1099-K and 1099-NEC.",
     assumptionsToAvoid: ["Do not double count processor receipts.", "Do not net processor fees unless the workpaper separately supports fees."],
     diligenceDuties: ["Request transaction detail when payer overlap is possible.", "Document how gross receipts were normalized."],
@@ -1341,11 +1377,24 @@ const ISSUE_PLAYBOOKS: Record<string, IssuePlaybook> = {
     reviewerChecklist: ["Compare payer names.", "Trace deposits or processor exports.", "Tie final receipts to the workpaper."],
     clearanceStandard: "Clear only after overlap is resolved and gross receipts tie to accepted evidence.",
     clientQuestionStrategy: "Ask the client to identify whether Bluepeak paid through Stripe or separately.",
+    clientCommunicationDraft:
+      "Can you confirm whether Bluepeak paid you through Stripe during 2024? If yes, please upload Stripe transaction detail showing Bluepeak payments. If no, tell us how Bluepeak paid you.",
+    preparerWorkPlan: [
+      "Create a payer/payment-channel table.",
+      "Mark each Bluepeak payment as Stripe, ACH/check, cash, or unknown.",
+      "Tie the reconciled total to the Schedule C gross receipts workpaper.",
+    ],
   },
   MISSING_1099_B: {
+    priority: 30,
     situationMode: "Document-driven investment income blocker",
     ruleSpace: ["Brokerage reporting", "Capital transactions", "Basis and holding-period substantiation"],
-    smellTests: ["Stock sale mentioned in transcript but no brokerage tax package is uploaded.", "Prior-year brokerage pattern increases expected-document confidence."],
+    smellTests: [
+      "Transcript says Miguel sold Tesla stock in March.",
+      "No 1099-B or consolidated brokerage statement is uploaded.",
+      "Prior-year brokerage pattern makes the missing document signal more credible.",
+    ],
+    dollarExposure: "Unknown until proceeds, basis, holding period, and wash-sale data are obtained; cannot estimate gain/loss from transcript alone.",
     professionalJudgment: "Treat the stock-sale statement as a document-triggering claim and block the investment section until brokerage support arrives.",
     assumptionsToAvoid: [
       "Do not infer proceeds, basis, holding period, or wash-sale adjustments from the transcript.",
@@ -1360,11 +1409,24 @@ const ISSUE_PLAYBOOKS: Record<string, IssuePlaybook> = {
     reviewerChecklist: ["Identify brokerage.", "Collect consolidated 1099-B.", "Review proceeds, basis, holding period, and wash-sale indicators."],
     clearanceStandard: "Clear only when brokerage documentation is uploaded or a reviewer records an explicit override with rationale.",
     clientQuestionStrategy: "Ask which brokerage held the Tesla shares and request the 2024 consolidated tax package.",
+    clientCommunicationDraft:
+      "Miguel, you mentioned selling Tesla stock in March. Which brokerage account held the shares? Please upload the 2024 consolidated 1099 or transaction statement for that account.",
+    preparerWorkPlan: [
+      "Request brokerage name and consolidated 1099-B.",
+      "Do not enter proceeds/basis from memory.",
+      "When received, review proceeds, basis, holding period, and wash-sale adjustments.",
+    ],
   },
   STATE_RESIDENCY: {
+    priority: 50,
     situationMode: "Mid-year move and possible multi-state wage allocation",
     ruleSpace: ["State residency", "Domicile facts", "Wage sourcing", "Engagement scope boundaries"],
-    smellTests: ["Move month is known but exact date is missing.", "California employer remains in the fact pattern after a Texas move claim."],
+    smellTests: [
+      "Client only gave 'July' move timing; exact move date is missing.",
+      "W-2 employer remains California-connected after a Texas move claim.",
+      "State workdays and domicile facts are not yet documented.",
+    ],
+    dollarExposure: "State exposure is not estimated until CA workdays/wages after the move are known.",
     professionalJudgment: "Route the CA-to-TX move through residency and wage-allocation review before state filing assumptions are accepted.",
     assumptionsToAvoid: [
       "Do not assume the move date from the month alone.",
@@ -1375,11 +1437,24 @@ const ISSUE_PLAYBOOKS: Record<string, IssuePlaybook> = {
     reviewerChecklist: ["Confirm move date.", "Confirm post-move work location.", "Review CA employer wage reporting.", "Decide if state specialist review is needed."],
     clearanceStandard: "Clear only after domicile and work-location facts are documented and reviewer signs off on state treatment.",
     clientQuestionStrategy: "Ask for exact move date, California workdays after the move, and facts showing the Texas domicile change.",
+    clientCommunicationDraft:
+      "What was your exact move date from California to Texas? After that date, did you work any days in California or continue performing services for your California employer from California?",
+    preparerWorkPlan: [
+      "Collect exact move date and domicile facts.",
+      "Review W-2 state wage reporting.",
+      "Determine whether state specialist/reviewer signoff is needed.",
+    ],
   },
   HOME_OFFICE_SUBSTANTIATION: {
+    priority: 60,
     situationMode: "Deduction opportunity with personal-use ambiguity",
     ruleSpace: ["Home office exclusive use", "Regular business use", "Schedule C substantiation"],
-    smellTests: ["Client mentioned guests using the room.", "Opportunity exists, but the same transcript weakens exclusive-use support."],
+    smellTests: [
+      "Client said guests sometimes stay in the room used as an office.",
+      "That statement directly conflicts with exclusive-use support.",
+      "No square footage or expense support is attached yet.",
+    ],
+    dollarExposure: "Not estimated; deduction amount depends on exclusive-use eligibility, square footage, and home expense support.",
     professionalJudgment: "Treat home office as an opportunity, not a claim, until exclusive and regular business use are confirmed.",
     assumptionsToAvoid: ["Do not claim the deduction when personal guest use is unresolved.", "Do not estimate square footage without client support."],
     diligenceDuties: ["Confirm exclusive use.", "Confirm regular business use.", "Collect square footage and expense support before workpaper approval."],
@@ -1387,11 +1462,24 @@ const ISSUE_PLAYBOOKS: Record<string, IssuePlaybook> = {
     reviewerChecklist: ["Confirm exclusive-use answer.", "Confirm regular-use answer.", "Review floor area and expense support.", "Approve or reject opportunity."],
     clearanceStandard: "Clear only if exclusive and regular use are supported and the reviewer approves the opportunity.",
     clientQuestionStrategy: "Ask whether guests or family used the office space at any time during 2024 and request dimensions only if exclusive use is confirmed.",
+    clientCommunicationDraft:
+      "For the home office, was that room used exclusively and regularly for your consulting business during 2024, or did guests/family use it for personal purposes at any time?",
+    preparerWorkPlan: [
+      "Resolve exclusive-use answer before requesting expense detail.",
+      "If eligible, collect office square footage, total home square footage, and expense support.",
+      "If personal guest use occurred, mark the opportunity rejected or route for reviewer judgment.",
+    ],
   },
   MILEAGE_SUBSTANTIATION: {
+    priority: 70,
     situationMode: "Substantiation-sensitive Schedule C deduction review",
     ruleSpace: ["Business mileage", "Contemporaneous records", "Business purpose support", "Firm mileage policy"],
-    smellTests: ["Only Q4 support is visible.", "Mileage entries lack complete business-purpose detail."],
+    smellTests: [
+      "Only Q4 mileage support is visible.",
+      "Uploaded log shows 1,180 business miles but business-purpose support is incomplete.",
+      "Full-year mileage cannot be extrapolated from Q4 without support.",
+    ],
+    dollarExposure: "1,180 Q4 miles are at stake before any full-year adjustment; final amount depends on supported miles and applicable standard mileage rate.",
     professionalJudgment: "Treat mileage as a possible deduction that needs contemporaneous business-purpose support before acceptance.",
     assumptionsToAvoid: ["Do not extrapolate Q4 mileage to the full year.", "Do not accept miles without business purpose and trip detail."],
     diligenceDuties: ["Request full-year mileage records.", "Confirm date, destination, miles, and business purpose.", "Tie vehicle use to Schedule C activity."],
@@ -1399,6 +1487,13 @@ const ISSUE_PLAYBOOKS: Record<string, IssuePlaybook> = {
     reviewerChecklist: ["Review log completeness.", "Confirm business purpose.", "Check full-year coverage.", "Approve supported mileage only."],
     clearanceStandard: "Clear only when the mileage log is complete enough for firm policy and reviewer approval.",
     clientQuestionStrategy: "Ask for a full-year log with date, destination, miles, and business purpose for each business trip.",
+    clientCommunicationDraft:
+      "Please upload the full-year mileage log. For each trip, we need the date, destination, miles, and business purpose. The Q4 log alone is not enough for final review.",
+    preparerWorkPlan: [
+      "Do not extrapolate Q4 mileage.",
+      "Request full-year log and business-purpose detail.",
+      "Tie accepted mileage to Schedule C activity before reviewer approval.",
+    ],
   },
 };
 
@@ -1439,11 +1534,14 @@ function buildProfessionalAnalyses(
     return {
       issueId: issue.id,
       title: issue.title,
+      priority: playbook.priority,
+      statusLabel: issue.status === "RESOLVED" ? "Resolved" : issue.blocker ? "Blocks filing until reviewed" : "Needs review before claiming",
       situationMode: playbook.situationMode,
       context: `${client?.displayName ?? "Client"} · ${taxReturn.taxYear} ${taxReturn.returnType} · ${taxReturn.jurisdiction}`,
       factPatternSummary: issue.description,
       ruleSpace: playbook.ruleSpace,
       smellTests: playbook.smellTests,
+      dollarExposure: playbook.dollarExposure,
       professionalJudgment: playbook.professionalJudgment,
       establishedFacts: establishedFacts.length > 0 ? establishedFacts : issue.sourceIds.map((sourceId) => sourceLabelForProfessionalAnalysis(data, sourceId)),
       clientClaims,
@@ -1458,6 +1556,8 @@ function buildProfessionalAnalyses(
       reviewerChecklist: playbook.reviewerChecklist,
       clearanceStandard: playbook.clearanceStandard,
       clientQuestionStrategy: playbook.clientQuestionStrategy,
+      clientCommunicationDraft: playbook.clientCommunicationDraft,
+      preparerWorkPlan: playbook.preparerWorkPlan,
       sourceIds: issue.sourceIds,
       citationIds: citationIdsForIssue(issue.issueType),
     };
@@ -1600,6 +1700,7 @@ function normalizeAIPrepReasoningOutput(
       ...analysis,
       ruleSpace: analysis.ruleSpace.length > 0 ? analysis.ruleSpace : fallback?.ruleSpace ?? [],
       smellTests: analysis.smellTests.length > 0 ? analysis.smellTests : fallback?.smellTests ?? [],
+      preparerWorkPlan: analysis.preparerWorkPlan.length > 0 ? analysis.preparerWorkPlan : fallback?.preparerWorkPlan ?? [],
       establishedFacts: analysis.establishedFacts.length > 0 ? analysis.establishedFacts : fallback?.establishedFacts ?? [],
       clientClaims: analysis.clientClaims.length > 0 ? analysis.clientClaims : fallback?.clientClaims ?? [],
       assumptionsToAvoid: analysis.assumptionsToAvoid.length > 0 ? analysis.assumptionsToAvoid : fallback?.assumptionsToAvoid ?? [],

@@ -82,6 +82,27 @@ function AssistantAnswer({ response, animate }: { response: TaxChatResponse; ani
         ))}
         {answer.limitation ? <p className="answer-warning">{answer.limitation}</p> : null}
 
+        {answer.verdict ? (
+          <div className="verdict-strip">
+            <div>
+              <strong>{answer.verdict.filingStatus}</strong>
+              <span>{answer.verdict.readinessMeaning}</span>
+            </div>
+            <div>
+              <strong>{answer.verdict.blockerCount}</strong>
+              <span>active blocker(s)</span>
+            </div>
+            <div>
+              <strong>{answer.verdict.readinessScore}%</strong>
+              <span>workflow readiness</span>
+            </div>
+            <div>
+              <strong>{answer.verdict.extensionRiskScore}%</strong>
+              <span>extension risk</span>
+            </div>
+          </div>
+        ) : null}
+
         <div className="chat-answer-grid">
           <div>
             <h3>Reasoning summary</h3>
@@ -93,6 +114,19 @@ function AssistantAnswer({ response, animate }: { response: TaxChatResponse; ani
           </div>
         </div>
 
+        {answer.actionQueues ? (
+          <div className="chat-answer-grid">
+            <div>
+              <h3>Client-facing queue</h3>
+              <ul>{answer.actionQueues.clientFacing.map((item) => <li key={item}>{item}</li>)}</ul>
+            </div>
+            <div>
+              <h3>Preparer-facing queue</h3>
+              <ul>{answer.actionQueues.preparerFacing.map((item) => <li key={item}>{item}</li>)}</ul>
+            </div>
+          </div>
+        ) : null}
+
         {answer.professionalAnalyses?.length ? (
           <div className="professional-analysis-list">
             <h3>EA-grade review frame</h3>
@@ -100,10 +134,11 @@ function AssistantAnswer({ response, animate }: { response: TaxChatResponse; ani
               <article className="professional-analysis-card" key={analysis.issueId}>
                 <div className="item-card-title">
                   <h4>{analysis.title}</h4>
-                  <StatusBadge label="Reviewer controlled" tone="yellow" />
+                  <StatusBadge label={analysis.statusLabel} tone={analysis.statusLabel.startsWith("Resolved") ? "green" : analysis.statusLabel.startsWith("Blocks") ? "red" : "yellow"} />
                 </div>
                 <small>{analysis.situationMode}</small>
                 <p>{analysis.professionalJudgment}</p>
+                <p><strong>Dollar exposure:</strong> {analysis.dollarExposure}</p>
                 <div className="chat-answer-grid">
                   <div>
                     <strong>Rule space</strong>
@@ -126,6 +161,14 @@ function AssistantAnswer({ response, animate }: { response: TaxChatResponse; ani
                   <strong>Reviewer checklist</strong>
                   <ul>{analysis.reviewerChecklist.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul>
                 </div>
+                <div>
+                  <strong>Client draft</strong>
+                  <p>{analysis.clientCommunicationDraft}</p>
+                </div>
+                <div>
+                  <strong>Preparer work plan</strong>
+                  <ul>{analysis.preparerWorkPlan.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul>
+                </div>
                 <SourcePills ids={[...analysis.sourceIds, ...analysis.citationIds]} sourceIndex={sourceIndex} />
               </article>
             ))}
@@ -133,7 +176,8 @@ function AssistantAnswer({ response, animate }: { response: TaxChatResponse; ani
         ) : null}
 
         <div className="chat-citations">
-          <h3>Sources cited</h3>
+          <h3>{answer.professionalAnalyses?.length ? "Conversation-level sources" : "Sources cited"}</h3>
+          {answer.professionalAnalyses?.length ? <p>Issue-specific sources are attached inside each EA review card above.</p> : null}
           {sourceIds.length > 0 ? <SourcePills ids={sourceIds} sourceIndex={sourceIndex} /> : <p>No source citation needed for this message.</p>}
         </div>
 
