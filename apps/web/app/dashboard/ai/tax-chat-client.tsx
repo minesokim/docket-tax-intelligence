@@ -351,6 +351,13 @@ function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate:
             </>
           ) : (
             <section className="memo-research-grid">
+              {answer.retrievedAuthority ? (
+                <div className="memo-retrieval-trace">
+                  <h3>Retrieval trace</h3>
+                  <p><strong>Query fired:</strong> {answer.retrievedAuthority.query}</p>
+                  <p><strong>Retrieved:</strong> {answer.retrievedAuthority.sources.length} official-source candidate(s), ranked by topic match and authority level.</p>
+                </div>
+              ) : null}
               <div>
                 <h3>Reasoning summary</h3>
                 <ul>{answer.reasoningSummary.map((item) => <li key={item}>{item}</li>)}</ul>

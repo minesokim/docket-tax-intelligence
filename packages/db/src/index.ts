@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import pg, { type PoolClient, type PoolConfig } from "pg";
 
@@ -521,7 +521,9 @@ export class JsonFileDocketRepository<TData> implements DocketRepository<TData> 
   write(data: TData): TData {
     const path = this.statePath;
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
+    const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tempPath, `${JSON.stringify(data, null, 2)}\n`);
+    renameSync(tempPath, path);
     return data;
   }
 

@@ -1333,6 +1333,13 @@ main {
   padding: 14px;
 }
 
+.memo-retrieval-trace p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
 .memo-research-grid h3,
 .memo-authority-list h3 {
   margin: 0 0 8px;

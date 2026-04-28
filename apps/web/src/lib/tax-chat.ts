@@ -82,6 +82,52 @@ function isGeneralResearchQuestion(question: string): boolean {
   return /\bobbba\b|\bob3\b|one big beautiful|beautiful bill|public law|congress|irs guidance|tax law change|new tax law|current authority|research|my clients|clients broadly|client impact/.test(q);
 }
 
+function activeResearchTopicFromText(text: string): string | null {
+  const normalized = normalizeForMatch(text);
+  if (/\bobbba\b|\bob3\b|one big beautiful|beautiful bill|public law 119-21|public law 119 21/.test(normalized)) {
+    return "OBBBA Public Law 119-21 client impact";
+  }
+  if (/form 2553|s corp|s corporation|small business corporation|late election/.test(normalized)) {
+    return "Form 2553 S corporation election late election relief";
+  }
+  if (/business mileage|standard mileage|vehicle expense|car expense|substantiat/.test(normalized)) {
+    return "business mileage substantiation records";
+  }
+  if (/home office|business use of home|exclusive use/.test(normalized)) {
+    return "home office deduction exclusive regular use";
+  }
+  if (/1099-b|1099b|stock sale|brokerage|capital gain|form 8949|schedule d/.test(normalized)) {
+    return "stock sale Form 1099-B capital gain reporting";
+  }
+  if (/1095-a|1095a|marketplace insurance|premium tax credit|aca/.test(normalized)) {
+    return "Form 1095-A marketplace insurance premium tax credit";
+  }
+  if (/crypto|digital asset|virtual currency|1099-da/.test(normalized)) {
+    return "digital assets cryptocurrency tax reporting";
+  }
+  return null;
+}
+
+function isAmbiguousResearchFollowup(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  const meaningfulTokens = normalized
+    .split(" ")
+    .filter((token) => token.length > 2 && !["how", "does", "this", "that", "these", "those", "it", "they", "affect", "impact", "client", "clients", "my", "our", "the", "what", "about", "mean"].includes(token));
+  return /\b(this|that|these|those|it|they|affect|impact|clients|client|them)\b/.test(normalized) && meaningfulTokens.length <= 2;
+}
+
+export function researchRetrievalQuery(question: string, history: ChatHistoryTurn[]): string {
+  const directTopic = activeResearchTopicFromText(question);
+  if (directTopic) return question;
+  if (!isAmbiguousResearchFollowup(question)) return question;
+
+  const recentTopic = [...history]
+    .reverse()
+    .map((turn) => activeResearchTopicFromText(turn.content))
+    .find((topic): topic is string => Boolean(topic));
+  return recentTopic ? `${recentTopic}. Follow-up question: ${question}` : question;
+}
+
 function resolveWorkbench(question: string, explicitReturnId?: string, history: ChatHistoryTurn[] = []): WorkbenchView | null {
   if (explicitReturnId && isGeneralResearchQuestion(question) && !mentionsKnownClient(question)) {
     return null;
@@ -492,7 +538,7 @@ function buildClientStatusAnswer(workbench: WorkbenchView | null): ChatAnswer {
   };
 }
 
-async function buildGroundedAnswer(question: string, output: ReasoningOutputView | null, hasClientContext: boolean, workbench: WorkbenchView | null): Promise<ChatAnswer> {
+async function buildGroundedAnswer(question: string, output: ReasoningOutputView | null, hasClientContext: boolean, workbench: WorkbenchView | null, retrievalQuestion = question): Promise<ChatAnswer> {
   const q = question.toLowerCase();
   const clientName = workbench?.client?.displayName ?? "the selected client";
   const incomeIssue = findIssue(output, "issue-income-mismatch");
@@ -536,7 +582,7 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
   }
 
   if (!hasClientContext) {
-    const research = await retrieveOfficialAuthority(question);
+    const research = await retrieveOfficialAuthority(retrievalQuestion);
     return {
       mode: "general-research",
       headline: research.answer.headline,
@@ -799,6 +845,7 @@ function maybeSynthesizeWithClaude(
 export async function buildTaxChatResponse(question: string, returnId?: string, conversationHistory: ChatHistoryTurn[] = []): Promise<TaxChatResponse> {
   const workbench = resolveWorkbench(question, returnId, conversationHistory);
   const hasClientContext = Boolean(workbench);
+  const retrievalQuestion = hasClientContext ? question : researchRetrievalQuery(question, conversationHistory);
   const output = asReasoningOutputView(workbench?.latestAIReasoningRun?.output);
   let sourceIndex: Record<string, SourceIndexEntry> = {};
   for (const [id, source] of Object.entries(workbench?.reasoningSourceIndex ?? {})) {
@@ -809,7 +856,7 @@ export async function buildTaxChatResponse(question: string, returnId?: string, 
       detail: source.detail,
     };
   }
-  const draftAnswer = await buildGroundedAnswer(question, output, hasClientContext, workbench);
+  const draftAnswer = await buildGroundedAnswer(question, output, hasClientContext, workbench, retrievalQuestion);
   sourceIndex = { ...sourceIndex, ...buildResearchSourceIndex(draftAnswer) };
   if (workbench) {
     draftAnswer.artifacts = runTaxChatOrchestrator({
