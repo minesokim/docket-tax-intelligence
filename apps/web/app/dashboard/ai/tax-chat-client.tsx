@@ -29,6 +29,232 @@ function SourcePills({ ids, sourceIndex }: { ids: string[]; sourceIndex: Record<
   );
 }
 
+function CitationChip({ id, sourceIndex }: { id: string; sourceIndex: Record<string, SourceIndexEntry> }) {
+  const source = sourceIndex[id];
+  return (
+    <a className="inline-citation" href={`#source-${id}`} title={source?.detail ?? id}>
+      {source?.label ?? id}
+    </a>
+  );
+}
+
+function sourceBuckets(response: TaxChatResponse) {
+  const { answer, sourceIndex } = response;
+  const ids = Array.from(
+    new Set([
+      ...answer.sourceIds,
+      ...answer.citationIds,
+      ...(answer.professionalAnalyses?.flatMap((analysis) => [...analysis.sourceIds, ...analysis.citationIds]) ?? []),
+    ]),
+  );
+  const bucketed = {
+    authority: [] as string[],
+    clientFile: [] as string[],
+    conversation: [] as string[],
+    knowledgeGraph: [] as string[],
+  };
+
+  for (const id of ids) {
+    const type = sourceIndex[id]?.type.toLowerCase() ?? "";
+    if (type.includes("authority") || id.startsWith("cite-")) bucketed.authority.push(id);
+    else if (type.includes("conversation") || type.includes("client claim")) bucketed.conversation.push(id);
+    else if (type.includes("document") || type.includes("tax fact") || type.includes("client question") || type.includes("workpaper")) bucketed.clientFile.push(id);
+    else bucketed.knowledgeGraph.push(id);
+  }
+
+  return bucketed;
+}
+
+function SourceRail({ response }: { response: TaxChatResponse }) {
+  const buckets = sourceBuckets(response);
+  const { sourceIndex } = response;
+  const renderBucket = (title: string, ids: string[]) => (
+    <div className="memo-source-bucket" key={title}>
+      <div>{title}</div>
+      {ids.length > 0 ? (
+        ids.slice(0, 12).map((id) => {
+          const source = sourceIndex[id];
+          return (
+            <a href={`#source-${id}`} id={`source-${id}`} key={`${title}-${id}`} title={source?.detail ?? id}>
+              {source?.label ?? id}
+            </a>
+          );
+        })
+      ) : (
+        <span>No source used</span>
+      )}
+    </div>
+  );
+
+  return (
+    <aside className="memo-sources-rail">
+      <strong>Sources consulted</strong>
+      {renderBucket("Authority", buckets.authority)}
+      {renderBucket("Client file", buckets.clientFile)}
+      {renderBucket("Conversation", buckets.conversation)}
+      {renderBucket("Knowledge graph", buckets.knowledgeGraph)}
+    </aside>
+  );
+}
+
+function ReconciliationTable({ sourceIndex }: { sourceIndex: Record<string, SourceIndexEntry> }) {
+  const rows: Array<[string, string, string, string]> = [
+    ["Stripe 1099-K gross", "$63,000", "Document on file", "doc-stripe-1099-k"],
+    ["Bluepeak 1099-NEC", "$42,000", "Document on file", "doc-bluepeak-1099-nec"],
+    ["Stripe payouts from Bluepeak", "Unknown", "Pull from Stripe dashboard", "clar-income-mismatch"],
+    ["Client estimate of Sch C gross", "~$85,000", "Client claim, not verified", "claim-freelance-85k"],
+  ];
+
+  return (
+    <div className="memo-review-table">
+      <div className="memo-table-title">Reconciliation needed</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Amount</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([label, amount, status, sourceId]) => (
+            <tr key={label}>
+              <td>{label}</td>
+              <td>{amount}</td>
+              <td>
+                {status} <CitationChip id={sourceId} sourceIndex={sourceIndex} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ReasoningTrace({ analysis }: { analysis: NonNullable<ChatAnswer["professionalAnalyses"]>[number] }) {
+  const steps = [
+    ["Classify", analysis.situationMode],
+    ["Reconstruct facts", analysis.factPatternSummary],
+    ["Identify rules", analysis.ruleSpace.join("; ")],
+    ["Stress test", analysis.smellTests.join("; ")],
+    ["Defensive check", analysis.clearanceStandard],
+    ["Communicate", analysis.clientQuestionStrategy],
+  ];
+
+  return (
+    <details className="reasoning-trace">
+      <summary>Show reasoning trace</summary>
+      <ol>
+        {steps.map(([label, body]) => (
+          <li key={label}>
+            <strong>{label}</strong>
+            <span>{body}</span>
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+function MemoAnswer({ response, animate }: { response: TaxChatResponse; animate: boolean }) {
+  const { answer, sourceIndex } = response;
+  const analyses = answer.professionalAnalyses ?? [];
+  const animatedLead = useTypewriter(answer.answer.join("\n\n"), animate);
+  const leadParagraphs = animatedLead.split("\n\n").filter(Boolean);
+  const issueCount = analyses.length;
+  const clientQueue = answer.actionQueues?.clientFacing ?? analyses.map((analysis) => analysis.clientCommunicationDraft);
+  const preparerQueue = answer.actionQueues?.preparerFacing ?? analyses.flatMap((analysis) => analysis.preparerWorkPlan);
+
+  return (
+    <article className="chat-message assistant-message memo-message">
+      <div className="chat-avatar">AI</div>
+      <div className="memo-workspace">
+        <div className="memo-document">
+          <div className="memo-breadcrumb">Clients / Miguel Sandoval / Tax year 2024</div>
+          <header className="memo-header">
+            <h2>{answer.headline}</h2>
+            <p>Memo · Generated just now · Reasoning: {issueCount} issues analyzed · Sources linked inline</p>
+          </header>
+
+          {answer.verdict ? (
+            <div className="memo-badges">
+              <span className={answer.verdict.filingStatus.includes("Not") ? "danger" : "success"}>{answer.verdict.filingStatus}</span>
+              <span>{answer.verdict.blockerCount} ready-to-file blocker(s)</span>
+              <span>Readiness: {answer.verdict.readinessScore}%</span>
+              <span>Extension risk: {answer.verdict.extensionRiskScore}%</span>
+            </div>
+          ) : null}
+
+          <section className="memo-lede">
+            {leadParagraphs.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
+          </section>
+
+          <h3 className="memo-section-label">Issues, ranked by filing impact</h3>
+          {analyses.map((analysis, index) => (
+            <section className="memo-issue" key={analysis.issueId}>
+              <div className="memo-issue-header">
+                <div>
+                  <h4>{index + 1}. {analysis.title}</h4>
+                  <p>{analysis.statusLabel} · Dollar impact: {analysis.dollarExposure}</p>
+                </div>
+                <span className={analysis.statusLabel.startsWith("Blocks") ? "danger" : analysis.statusLabel.startsWith("Resolved") ? "success" : "warning"}>
+                  {analysis.statusLabel.startsWith("Resolved") ? "Resolved" : analysis.statusLabel.startsWith("Blocks") ? "Blocker" : "Review needed"}
+                </span>
+              </div>
+
+              <p className="memo-prose">
+                {analysis.professionalJudgment} {analysis.riskRationale} {analysis.ruleSpace.slice(0, 2).map((rule) => (
+                  <span key={rule}> <span className="inline-citation">{rule}</span></span>
+                ))}
+              </p>
+
+              {analysis.issueId.includes("income") || analysis.issueId.includes("1099k") ? <ReconciliationTable sourceIndex={sourceIndex} /> : null}
+
+              <div className="memo-smell-tests">
+                <strong>EA smell tests</strong>
+                <ul>{analysis.smellTests.map((test) => <li key={test}>{test}</li>)}</ul>
+              </div>
+
+              <div className="memo-source-chips">
+                {[...analysis.citationIds, ...analysis.sourceIds].slice(0, 8).map((id) => (
+                  <CitationChip id={id} sourceIndex={sourceIndex} key={id} />
+                ))}
+              </div>
+
+              <div className="memo-actions">
+                <button type="button">Draft client request</button>
+                <button type="button">{analysis.issueId.includes("income") || analysis.issueId.includes("1099k") ? "Open reconciliation table" : "Open source packet"}</button>
+              </div>
+              <ReasoningTrace analysis={analysis} />
+            </section>
+          ))}
+
+          <section className="memo-action-queues">
+            <div>
+              <h3>Send to client</h3>
+              <ol>{clientQueue.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ol>
+            </div>
+            <div>
+              <h3>Preparer queue</h3>
+              <ol>{Array.from(new Set(preparerQueue)).slice(0, 6).map((item) => <li key={item}>{item}</li>)}</ol>
+            </div>
+          </section>
+
+          <footer className="memo-footer-actions">
+            <button type="button">Export memo PDF</button>
+            <button type="button">Send all client requests</button>
+            <button type="button">Open review table</button>
+          </footer>
+        </div>
+        <SourceRail response={response} />
+      </div>
+    </article>
+  );
+}
+
 function ThinkingBubble() {
   return (
     <article className="chat-message assistant-message">
@@ -68,6 +294,10 @@ function AssistantAnswer({ response, animate }: { response: TaxChatResponse; ani
   const sourceIds = Array.from(new Set([...answer.sourceIds, ...answer.citationIds]));
   const animatedBody = useTypewriter(answer.answer.join("\n\n"), animate);
   const bodyParagraphs = animatedBody.split("\n\n").filter(Boolean);
+
+  if (answer.mode === "client-return" && answer.professionalAnalyses?.length) {
+    return <MemoAnswer response={response} animate={animate} />;
+  }
 
   return (
     <article className="chat-message assistant-message">
