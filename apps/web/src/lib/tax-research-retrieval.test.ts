@@ -88,7 +88,7 @@ describe("tax research authority ranking", () => {
     expect(query).not.toContain("OBBBA Public Law 119-21 client impact");
     expect(response.answer.mode).toBe("firm-portfolio");
     expect(response.answer.retrievedAuthority).toBeUndefined();
-    expect(response.answer.reasoningSummary.join(" ")).toContain("Skipped authority retrieval");
+    expect(response.answer.reasoningSummary.join(" ")).toContain("Ranked the roster by active red issues");
   }, 15_000);
 
   it("routes deadline-risk wording to portfolio mode instead of authority research", async () => {
@@ -116,6 +116,25 @@ describe("tax research authority ranking", () => {
     expect(text).toContain("Lucas Peterson");
     expect(text).toContain("not stored as a first-class field");
     expect(text).not.toContain("Open red issues:");
+    expect(text).not.toMatch(/filtered portfolio|default firm queue|generic workflow/i);
+    expect(response.answer.reasoningSummary.join(" ")).not.toMatch(/Detected|Classified|generic workflow/i);
+  }, 15_000);
+
+  it("keeps open-red and 6694 portfolio prose substantive instead of exposing routing internals", async () => {
+    const redResponse = await buildTaxChatResponse("Show me everyone with an open red issue.");
+    const exposureResponse = await buildTaxChatResponse("What's my §6694 exposure across the book right now?");
+    const combinedText = [
+      ...redResponse.answer.answer,
+      ...redResponse.answer.reasoningSummary,
+      ...exposureResponse.answer.answer,
+      ...exposureResponse.answer.reasoningSummary,
+    ].join("\n");
+
+    expect(redResponse.answer.mode).toBe("firm-portfolio");
+    expect(exposureResponse.answer.mode).toBe("firm-portfolio");
+    expect(redResponse.answer.answer.join("\n")).toContain("Miguel Sandoval");
+    expect(exposureResponse.answer.answer.join("\n")).toContain("false clearance");
+    expect(combinedText).not.toMatch(/filtered portfolio|default firm queue|generic workflow|Detected a portfolio|Classified/i);
   }, 15_000);
 
   it("keeps cross-client fact-pattern comparisons in portfolio mode without rendering a client memo", async () => {

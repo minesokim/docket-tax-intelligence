@@ -518,7 +518,7 @@ function buildClientLookupAnswer(workbench: WorkbenchView | null): ChatAnswer {
       "Tell me what you want to do with the file: status, blockers, documents, client questions, sources, reconciliation, or a full reviewer memo.",
     ],
     reasoningSummary: [
-      "I treated this as a client lookup, not a request for analysis.",
+      "Client lookup found the return file; no tax conclusion was made.",
       "No tax conclusion or filing-readiness conclusion was made from the word alone.",
     ],
     nextSteps: [
@@ -566,8 +566,8 @@ function buildClientStatusAnswer(workbench: WorkbenchView | null): ChatAnswer {
       extensionReasons.length > 0 ? `Extension risk drivers: ${extensionReasons.join("; ")}.` : "No extension drivers are currently listed.",
     ],
     reasoningSummary: [
-      "I treated the request as an operational status summary.",
-      "I did not run the full reviewer memo because the prompt did not ask for deep analysis.",
+      "Status view summarizes readiness, extension risk, filing gate blockers, and open issue counts.",
+      "Full reviewer analysis is available on request, but the status view stays short.",
       "The summary separates readiness percentage from ready-to-file clearance.",
     ],
     nextSteps: [
@@ -696,7 +696,7 @@ function buildDataDisclosureRefusalAnswer(workbench: WorkbenchView | null): Chat
       "I also will not summarize or package the client's tax data in this chat for that purpose. This is a data-handling refusal, not a tax conclusion.",
     ],
     reasoningSummary: [
-      "Classified the request as client-data disclosure and security handling, not tax research or return analysis.",
+      "Client tax information must stay inside approved firm-controlled channels.",
       "Personal email is outside the controlled client-data workflow and should be blocked before any source packet or export is produced.",
       "No full client memo or issue stack is rendered because the requested action is prohibited.",
     ],
@@ -907,14 +907,13 @@ function buildDeadlineRiskAnswer(): ChatAnswer {
     mode: "firm-portfolio",
     headline: "Deadline-risk clients from the current Docket roster.",
     answer: [
-      "I treated this as a portfolio deadline-risk question, not an authority-research question. The risk signal comes from Docket's return readiness, extension-risk score, open red issues, blocker issues, missing documents, and response latency.",
+      "These clients are most exposed to deadline slippage based on readiness, extension-risk score, open red issues, blocker issues, missing documents, and response latency.",
       ...candidates.slice(0, 8).map((candidate) => `${candidate.priority}: ${candidate.name} — ${candidate.reasons.join(" ")} Evidence: ${candidate.evidenceLabels.join("; ")}.`),
       "This is an internal deadline triage list. It is not a filing-clearance determination and it should not replace checking whether an extension has actually been filed for each taxpayer.",
     ],
     reasoningSummary: [
-      "Classified 'who is at risk of missing the deadline' as portfolio workflow, not tax-law research.",
       "Ranked clients by extension risk, blockers, open red issues, missing documents, readiness, and slow response behavior.",
-      "Skipped IRS authority retrieval because the question asks who in the roster needs operational attention.",
+      "Deadline risk is a workflow signal; statutory deadline and extension status still need to be checked per return.",
     ],
     nextSteps: [
       "Confirm whether an extension has already been filed for each HIGH client.",
@@ -961,13 +960,15 @@ function buildRedIssueAndComplianceAnswer(question: string): ChatAnswer {
   const nextSteps: string[] = [];
   if (wantsRedIssues || wants6694) {
     sections.push(
-      `Open red issues: ${redIssueRows.length ? redIssueRows.map((row) => `${row.client.displayName} (${row.issues.length}: ${row.issues.map((issue) => issue.title).join("; ")})`).join(" | ") : "none in the current roster"}.`,
+      redIssueRows.length
+        ? `${redIssueRows.length} clients have open red issues right now. ${redIssueRows.map((row) => `${row.client.displayName} has ${row.issues.length}: ${row.issues.map((issue) => issue.title).join("; ")}.`).join(" ")}`
+        : "No clients have open red issues in the current roster.",
     );
     nextSteps.push("Open each red issue and confirm whether evidence, authority, and reviewer state support clearance.");
   }
   if (wants6694) {
     sections.push(
-      "§6694 exposure map: Docket should treat Miguel Sandoval, Omar Haddad, Ben Larson, and Priya Narayan as the highest operational exposure because each has an open red/blocker issue where false clearance could support an unreasonable-position or reckless/preparer-diligence narrative. This is not a statutory penalty-dollar calculation; pull current §6694 authority before quoting amounts.",
+      "Treat Miguel Sandoval, Omar Haddad, Ben Larson, and Priya Narayan as the highest operational §6694 exposure because each has an open red/blocker issue where false clearance could support an unreasonable-position or reckless/preparer-diligence narrative. This is not a statutory penalty-dollar calculation; pull current §6694 authority before quoting amounts.",
     );
     nextSteps.push("Run a current §6694 authority retrieval before quoting penalty amounts or drafting a partner-facing risk memo.");
   }
@@ -996,14 +997,10 @@ function buildRedIssueAndComplianceAnswer(question: string): ChatAnswer {
   return {
     mode: "firm-portfolio",
     headline,
-    answer: [
-      "This is a filtered portfolio answer. I did not return the default firm queue; I filtered the roster to the requested compliance signals.",
-      ...sections,
-      "Treat these as internal review queues. Client-facing conclusions still need the underlying file evidence, current authority where applicable, and reviewer approval.",
-    ],
+    answer: [...sections, "Treat these as internal review queues. Client-facing conclusions still need the underlying file evidence, current authority where applicable, and reviewer approval."],
     reasoningSummary: [
-      "Detected a portfolio compliance filter rather than a generic workflow question.",
-      "Filtered by open RED issues and, when requested, by Form 8867 candidate signals in dependent/education/family-credit files.",
+      "Open red issues are unresolved reviewer-risk signals, not final tax conclusions.",
+      wants8867 ? "Form 8867 candidates are inferred from dependent, education-credit, and family-credit file signals until explicit 8867 tracking exists." : "Only currently open red/blocker issue signals are included.",
       wants6694 ? "Flagged §6694 exposure operationally from false-clearance risk; no statutory penalty amount was computed without authority retrieval." : "No §6694 calculation was requested.",
     ],
     nextSteps,
@@ -1024,7 +1021,7 @@ function buildSimilarFactPatternAnswer(question: string): ChatAnswer {
       mode: "firm-portfolio",
       headline: "I need a client anchor before comparing fact patterns.",
       answer: ["Ask the question with a client name, for example: 'Which clients have similar fact patterns to Miguel?'"],
-      reasoningSummary: ["Detected a similarity question but could not identify the anchor client."],
+      reasoningSummary: ["A comparison needs an anchor client so Docket can separate similar facts from unrelated roster data."],
       nextSteps: ["Name the client whose facts should be used as the comparison anchor."],
       sourceIds: [],
       citationIds: [],
@@ -1060,12 +1057,12 @@ function buildSimilarFactPatternAnswer(question: string): ChatAnswer {
     mode: "firm-portfolio",
     headline: `Clients with fact patterns similar to ${anchorClient.displayName}.`,
     answer: [
-      `I matched against ${anchorClient.displayName}'s client tags, source-document classes, open issue types, risk posture, and workflow profile. This is portfolio pattern matching, not a tax conclusion.`,
+      `${anchorClient.displayName}'s closest matches are based on client tags, source-document classes, open issue types, risk posture, and workflow profile. This is pattern matching, not a tax conclusion.`,
       ...matches.slice(0, 6).map((row) => `${row.client.displayName} — overlap: ${row.overlap.join("; ")}. Return state: ${row.taxReturn?.status.replaceAll("_", " ").toLowerCase() ?? "unknown"}; readiness ${row.taxReturn?.readinessScore ?? 0}%; extension risk ${row.taxReturn?.extensionRiskScore ?? 0}%.`),
     ],
     reasoningSummary: [
-      "Detected a cross-client similarity question, so the loaded client file did not trigger a Miguel-only memo.",
       "Compared tags, document classes, issue types, risk level, extension risk, and response latency.",
+      "Similarity supports workpaper reuse and review sequencing; it does not transfer conclusions across clients.",
     ],
     nextSteps: ["Open the top match if you want a file-specific memo.", "Use the similarity list to reuse workpaper patterns, not to copy tax conclusions."],
     sourceIds: [anchorClient.id, ...matches.slice(0, 6).map((row) => row.client.id)],
@@ -1104,7 +1101,6 @@ function buildEmployerStateWithholdingAnswer(): ChatAnswer {
       "Coordination here means shared review pattern, not shared client facts. Do not assume the same state treatment applies across clients without workday, domicile, and employer withholding evidence.",
     ],
     reasoningSummary: [
-      "Detected an employer/state-withholding portfolio question.",
       "Read W-2 seeded document text for employer, state wages, and state withholding lines.",
       "Separated same-employer grouping from similar state-allocation risk.",
     ],
@@ -1138,15 +1134,13 @@ async function buildPortfolioImpactAnswer(_question: string, retrievalQuestion: 
       mode: "firm-portfolio",
       headline: "Firm focus queue from the current Docket roster.",
       answer: [
-        "This is a portfolio/workflow answer, not a tax-law research memo. I did not run authority retrieval because the question is about what to work on now, not about a tax conclusion.",
+        "Highest-priority files right now are the returns with the strongest combination of red issues, blockers, extension risk, missing documents, low readiness, and slow-response patterns.",
         ...topCandidates.map((candidate) => `${candidate.priority}: ${candidate.name} — ${candidate.reasons.join(" ")} Evidence: ${candidate.evidenceLabels.join("; ")}.`),
         "Use this as an internal triage queue. It should not generate client-facing tax advice by itself; open the client card when you want the file-specific memo, source packet, questions, or workpapers.",
       ],
       reasoningSummary: [
-        "Classified the prompt as firm portfolio/workflow because it asks which clients or returns need attention across the book.",
-        "Portfolio mode wins over a loaded client file, so an open Miguel workbench does not hijack plural roster questions.",
         "Ranked the roster by active red issues, blocker issues, extension risk, readiness, missing documents, slow-response behavior, and reviewer actionability.",
-        "Skipped authority retrieval because this question does not ask for a tax-law conclusion; the sources used are Docket client/return records.",
+        "Client-facing outreach should remain reviewer-controlled for any file with red/blocker signals.",
       ],
       nextSteps: [
         "Work HIGH items first, starting with the highest combined blocker and extension-risk score.",
@@ -1176,10 +1170,8 @@ async function buildPortfolioImpactAnswer(_question: string, retrievalQuestion: 
       "No client should receive a client-facing number from this screen alone. The next step is provision-level review against current authority, the client's tax year, state conformity, and actual source documents.",
     ],
     reasoningSummary: [
-      "Classified the prompt as firm portfolio intelligence because it asks for named clients, not another authority memo.",
-      `Used the active research topic '${topic}' from the conversation before screening the roster.`,
-      "Screened client tags, return type, source-document classes, and open issue severity; did not invent eligibility facts that are not in the Docket file.",
-      "Retrieved authority only to preserve the governing topic; client names came from Docket client records, not from the model.",
+      `Screened the roster against '${topic}' using client tags, return type, source-document classes, and open issue severity.`,
+      "Names are screening candidates only; eligibility still requires provision-level authority, file evidence, and reviewer signoff.",
     ],
     nextSteps: [
       `Create a ${topic} review queue for the named clients and assign a reviewer before client outreach.`,
@@ -1297,7 +1289,7 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
         "Docket can summarize the issues and draft questions, but it should not mark a return ready to file until red flags are resolved, client clarifications are answered, material facts are reviewer-approved, and signature/8879 status is complete.",
       ],
       reasoningSummary: [
-        `I matched the question to ${clientName}'s return readiness, active issue graph, missing-document signals, and ready-to-file gate.`,
+        `${clientName}'s filing answer depends on return readiness, active issues, missing-document signals, and the ready-to-file gate.`,
         "The clearance verdict comes from review gates, not the workflow readiness percentage.",
         "Issue-specific details below come from the selected client return rather than a hardcoded demo path.",
       ],
@@ -1345,7 +1337,7 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
         stockIssue?.recommendedAction ?? "Docket detected a stock or brokerage signal and should request a 1099-B or consolidated brokerage statement before clearing the return.",
         "Treat conversation references as claims until proceeds, basis, holding period, and wash-sale detail are supported by documents or reviewer override.",
       ],
-      reasoningSummary: ["I treated the transcript as a conversation claim, not a verified tax fact.", "Docket creates a missing document signal instead of inventing basis or proceeds."],
+      reasoningSummary: ["Transcript references are client claims until source documents verify proceeds, basis, holding period, and wash-sale data.", "Docket creates a missing document signal instead of inventing basis or proceeds."],
       nextSteps: ["Ask which brokerage held the shares.", "Request the 2024 consolidated 1099 or transaction statement.", "Escalate if the client cannot provide basis or proceeds support."],
       professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-missing-1099-b"]),
       sourceIds: stockIssue?.sourceIds ?? ["insight-stock-sale", "pattern-brokerage"],
@@ -1362,7 +1354,7 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
         homeOfficeIssue?.recommendedAction ?? "The opportunity needs exclusive-use and regular-use facts before it can be considered for filing.",
         "Docket should keep this as a review-needed opportunity until the client confirms facts and the reviewer accepts the position.",
       ],
-      reasoningSummary: ["I matched the conversation insight to the Schedule C context and checked the substantiation gap.", "Publication 587 is cited for the exclusive and regular business use requirement."],
+      reasoningSummary: ["The home-office opportunity depends on Schedule C context plus exclusive/regular use support.", "Publication 587 is cited for the exclusive and regular business use requirement."],
       nextSteps: ["Ask whether the space was used exclusively and regularly for business during 2024.", "Collect square footage and expense support only if exclusive use is confirmed.", "Route the opportunity for reviewer approval."],
       professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-home-office-exclusive-use"]),
       sourceIds: homeOfficeIssue?.sourceIds ?? ["insight-home-office"],
@@ -1379,7 +1371,7 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
         mileageIssue?.recommendedAction ?? "Business mileage should remain review-needed until the records show date, destination, miles, and business purpose.",
         "Docket should not extrapolate partial records or auto-claim a deduction without source-backed support.",
       ],
-      reasoningSummary: ["I matched the uploaded mileage log to the deduction opportunity engine.", "Publication 463 is cited for mileage and travel record support."],
+      reasoningSummary: ["Mileage support requires date, destination, miles, and business purpose before deduction acceptance.", "Publication 463 is cited for mileage and travel record support."],
       nextSteps: ["Request the full-year contemporaneous mileage log.", "Confirm date, destination, miles, and business purpose for each trip.", "Keep the deduction out of final filing readiness until reviewer approval."],
       professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-mileage-substantiation"]),
       sourceIds: mileageIssue?.sourceIds ?? ["doc-q4-mileage-log"],
