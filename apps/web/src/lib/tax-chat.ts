@@ -2,7 +2,14 @@ import { synthesizeTaxChatWithClaude } from "@docket/ai";
 import { getReturnWorkbench } from "@docket/domain";
 import { retrieveOfficialAuthority } from "@docket/tax-knowledge";
 
-import { suggestedQuestions, type ChatAnswer, type ChatHistoryTurn, type SourceIndexEntry, type TaxChatResponse } from "./tax-chat-shared";
+import {
+  suggestedQuestions,
+  type ChatAnswer,
+  type ChatHistoryTurn,
+  type ProfessionalAnalysisView,
+  type SourceIndexEntry,
+  type TaxChatResponse,
+} from "./tax-chat-shared";
 
 type ReasoningOutputView = {
   issueSummaries: {
@@ -14,6 +21,7 @@ type ReasoningOutputView = {
     citationIds: string[];
     recommendedAction: string;
   }[];
+  professionalAnalyses?: ProfessionalAnalysisView[];
   clientQuestions: { question: string; sourceIds: string[]; citationIds: string[] }[];
   authorityContext: {
     citations: { citationId: string }[];
@@ -60,6 +68,57 @@ function buildCasualAnswer(): ChatAnswer {
   };
 }
 
+function issueSourceLabel(workbench: WorkbenchView | null, sourceId: string): string {
+  const source = workbench?.reasoningSourceIndex[sourceId];
+  return source ? `${source.type}: ${source.label}` : sourceId;
+}
+
+function fallbackProfessionalAnalyses(workbench: WorkbenchView | null): ProfessionalAnalysisView[] {
+  if (!workbench) return [];
+  return workbench.issues.slice(0, 6).map((issue) => {
+    const missingFacts = workbench.questions
+      .filter((question) => question.relatedIssueId === issue.id && question.status !== "ANSWERED")
+      .map((question) => question.question);
+    const sourceLabels = issue.sourceIds.map((sourceId) => issueSourceLabel(workbench, sourceId));
+    return {
+      issueId: issue.id,
+      title: issue.title,
+      situationMode: issue.blocker ? "Client-file blocker review" : "Client-file risk review",
+      context: `${workbench.client?.displayName ?? "Client"} · ${workbench.taxReturn.taxYear} ${workbench.taxReturn.returnType} · ${workbench.taxReturn.jurisdiction}`,
+      factPatternSummary: issue.description,
+      ruleSpace: ["Client fact graph", "Evidence references", "Knowledge snapshot", "Firm review gates"],
+      smellTests: issue.blocker
+        ? ["Open blocker remains unresolved.", "False clearance would make the return look safer than it is."]
+        : ["Issue needs professional review before it becomes a claimed position."],
+      professionalJudgment: issue.blocker
+        ? "Treat this as blocking until the missing facts are documented and reviewer approval is recorded."
+        : "Treat this as review-needed intelligence before claiming, clearing, or advising on the position.",
+      establishedFacts: sourceLabels,
+      clientClaims: sourceLabels.filter((label) => label.toLowerCase().includes("claim") || label.toLowerCase().includes("conversation")),
+      assumptionsToAvoid: ["Do not convert a client statement into a verified fact.", "Do not clear the issue from model wording alone."],
+      missingFacts: missingFacts.length > 0 ? missingFacts : ["Reviewer should confirm whether any additional facts are needed."],
+      authorityPosture: "Use the attached knowledge snapshot and citation set as research support; reviewer judgment applies it to the client facts.",
+      diligenceDuties: ["Separate facts from assumptions.", "Tie material positions to evidence.", "Escalate uncertainty instead of silently clearing it."],
+      riskRationale: issue.description,
+      reviewerChecklist: ["Review evidence.", "Confirm missing facts are answered.", "Approve or reject the position with a note."],
+      clearanceStandard: "Clear only when evidence, authority, and reviewer approval support the position.",
+      clientQuestionStrategy: issue.recommendedAction,
+      sourceIds: issue.sourceIds,
+      citationIds: [],
+    };
+  });
+}
+
+function professionalAnalysesForAnswer(
+  workbench: WorkbenchView | null,
+  output: ReasoningOutputView | null,
+  issueIds?: string[],
+): ProfessionalAnalysisView[] {
+  const analyses = output?.professionalAnalyses?.length ? output.professionalAnalyses : fallbackProfessionalAnalyses(workbench);
+  const filtered = issueIds?.length ? analyses.filter((analysis) => issueIds.includes(analysis.issueId)) : analyses;
+  return filtered.slice(0, 4);
+}
+
 function buildClientDeepDiveAnswer(workbench: WorkbenchView | null, output: ReasoningOutputView | null): ChatAnswer {
   const clientName = workbench?.client?.displayName ?? "this client";
   const taxReturn = workbench?.taxReturn;
@@ -90,6 +149,7 @@ function buildClientDeepDiveAnswer(workbench: WorkbenchView | null, output: Reas
       "Do not claim home office or mileage until the missing substantiation facts are answered and reviewed.",
       "Prepare an extension workflow unless the missing 1099-B, red flags, and review approvals are resolved quickly.",
     ],
+    professionalAnalyses: professionalAnalysesForAnswer(workbench, output),
     sourceIds: [
       ...(workbench?.documents.map((document) => document.id) ?? []),
       ...(workbench?.issues.flatMap((issue) => issue.sourceIds) ?? []),
@@ -175,6 +235,7 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
         "Request the 2024 consolidated brokerage 1099 for the Tesla sale.",
         "Route material facts and any resolved red flags through reviewer approval before filing readiness.",
       ],
+      professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-income-mismatch", "issue-missing-1099-b"]),
       sourceIds: [...(incomeIssue?.sourceIds ?? []), ...(stockIssue?.sourceIds ?? []), ...allIssueSourceIds],
       citationIds: [...(incomeIssue?.citationIds ?? []), ...allCitationIds],
       suggestedFollowups: ["Show me the income mismatch evidence.", "Draft the exact client questions.", "What review gates are still blocking Miguel?"],
@@ -191,6 +252,7 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
       ],
       reasoningSummary: ["I separated the client claim from document-backed facts.", "The variance is material enough to keep Schedule C gross receipts blocked."],
       nextSteps: ["Ask whether the Stripe 1099-K includes payments also reported on the Bluepeak 1099-NEC.", "Request Stripe detail or bookkeeping support.", "Keep the income issue open until the reviewer accepts the reconciled gross receipts fact."],
+      professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-income-mismatch", "issue-1099k-overlap"]),
       sourceIds: [...(incomeIssue?.sourceIds ?? []), ...(overlapIssue?.sourceIds ?? [])],
       citationIds: [...(incomeIssue?.citationIds ?? []), ...(overlapIssue?.citationIds ?? [])],
       suggestedFollowups: ["What exact question should we ask Miguel?", "What facts are established versus claimed?", "What workpaper should this create?"],
@@ -204,6 +266,7 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
       answer: ["Miguel said in the meeting transcript that he sold Tesla stock in March. Docket also has a prior-year brokerage pattern.", "No 1099-B is currently in the document set, so the stock-sale issue remains a red blocker for the return workflow."],
       reasoningSummary: ["I treated the transcript as a conversation claim, not a verified tax fact.", "Docket creates a missing document signal instead of inventing basis or proceeds."],
       nextSteps: ["Ask which brokerage held the Tesla shares.", "Request the 2024 consolidated 1099 or transaction statement.", "Escalate if the client cannot provide basis or proceeds support."],
+      professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-missing-1099-b"]),
       sourceIds: stockIssue?.sourceIds ?? ["insight-stock-sale", "pattern-brokerage"],
       citationIds: stockIssue?.citationIds ?? [],
       suggestedFollowups: ["Draft the brokerage document request.", "What can we do if Miguel cannot find the 1099-B?", "Show all missing documents."],
@@ -217,6 +280,7 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
       answer: ["The opportunity is detected because Miguel has Schedule C activity and mentioned using a room at home as an office.", "The issue is not ready because he also said guests sometimes stay there, so exclusive use is not confirmed."],
       reasoningSummary: ["I matched the conversation insight to the Schedule C context and checked the substantiation gap.", "Publication 587 is cited for the exclusive and regular business use requirement."],
       nextSteps: ["Ask whether the space was used exclusively and regularly for business during 2024.", "Collect square footage and expense support only if exclusive use is confirmed.", "Route the opportunity for reviewer approval."],
+      professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-home-office-exclusive-use"]),
       sourceIds: homeOfficeIssue?.sourceIds ?? ["insight-home-office"],
       citationIds: homeOfficeIssue?.citationIds ?? ["cite-pub587-exclusive-use"],
       suggestedFollowups: ["What exact home office question should we ask?", "What documents support a home office deduction?", "Should this be a blocker?"],
@@ -230,6 +294,7 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
       answer: ["Docket sees a Q4 mileage log, so business mileage is a possible deduction opportunity.", "The concern is that the log lacks full-year coverage and business-purpose support, so it should remain review-needed."],
       reasoningSummary: ["I matched the uploaded mileage log to the deduction opportunity engine.", "Publication 463 is cited for mileage and travel record support."],
       nextSteps: ["Request the full-year contemporaneous mileage log.", "Confirm date, destination, miles, and business purpose for each trip.", "Keep the deduction out of final filing readiness until reviewer approval."],
+      professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-mileage-substantiation"]),
       sourceIds: mileageIssue?.sourceIds ?? ["doc-q4-mileage-log"],
       citationIds: mileageIssue?.citationIds ?? ["cite-pub463-records"],
       suggestedFollowups: ["Draft a mileage support request.", "What facts are missing for mileage?", "Create a mileage workpaper summary."],
@@ -243,6 +308,7 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
       answer: ["Miguel's extension risk is high because a 1099-B is missing, red flags remain unresolved, state residency facts need follow-up, and he is a slow responder.", "This is a workflow recommendation to reduce deadline risk while the firm resolves blockers."],
       reasoningSummary: ["I combined missing material documents, red issues, unanswered questions, prior-year extension history, and client response latency."],
       nextSteps: ["Prepare the extension workflow while continuing document collection.", "Prioritize the 1099-B and income-overlap clarification.", "Keep reviewer approval gates in place before signature or filing readiness."],
+      professionalAnalyses: professionalAnalysesForAnswer(workbench, output, ["issue-income-mismatch", "issue-missing-1099-b", "issue-state-residency"]),
       sourceIds: [...(stockIssue?.sourceIds ?? []), ...(incomeIssue?.sourceIds ?? []), ...(stateIssue?.sourceIds ?? [])],
       citationIds: allCitationIds,
       suggestedFollowups: ["What are the reasons for the extension risk score?", "What would lower Miguel's extension risk?", "Which client reminders should we send today?"],
@@ -256,6 +322,7 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
       answer: ["The most important questions are about 1099-K overlap, the Tesla brokerage account, the exact CA-to-TX move date, and home office exclusive use."],
       reasoningSummary: ["I prioritized questions tied to blocker issues before nonblocking opportunities."],
       nextSteps: output?.clientQuestions.map((questionItem) => questionItem.question).slice(0, 5) ?? ["Run AI Prep to generate targeted client questions."],
+      professionalAnalyses: professionalAnalysesForAnswer(workbench, output),
       sourceIds: output?.clientQuestions.flatMap((questionItem) => questionItem.sourceIds) ?? [],
       citationIds: output?.clientQuestions.flatMap((questionItem) => questionItem.citationIds) ?? [],
       suggestedFollowups: ["Draft the exact client message.", "Which questions require reviewer approval?", "What questions can the portal show Miguel?"],

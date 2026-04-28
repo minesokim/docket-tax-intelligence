@@ -866,6 +866,34 @@ main {
   background: #f8faf8;
 }
 
+.professional-analysis-list {
+  display: grid;
+  gap: 12px;
+}
+
+.professional-analysis-list > h3 {
+  margin: 0;
+}
+
+.professional-analysis-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.professional-analysis-card h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.professional-analysis-card strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
 .authority-source-list {
   display: grid;
   gap: 12px;

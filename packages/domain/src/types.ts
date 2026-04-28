@@ -187,6 +187,32 @@ export const AIPrepReasoningOutputSchema = z.object({
       recommendedAction: z.string(),
     }),
   ),
+  professionalAnalyses: z
+    .array(
+      z.object({
+        issueId: z.string(),
+        title: z.string(),
+        situationMode: z.string(),
+        context: z.string(),
+        factPatternSummary: z.string(),
+        ruleSpace: z.array(z.string()),
+        smellTests: z.array(z.string()),
+        professionalJudgment: z.string(),
+        establishedFacts: z.array(z.string()),
+        clientClaims: z.array(z.string()),
+        assumptionsToAvoid: z.array(z.string()),
+        missingFacts: z.array(z.string()),
+        authorityPosture: z.string(),
+        diligenceDuties: z.array(z.string()),
+        riskRationale: z.string(),
+        reviewerChecklist: z.array(z.string()),
+        clearanceStandard: z.string(),
+        clientQuestionStrategy: z.string(),
+        sourceIds: z.array(z.string()),
+        citationIds: z.array(z.string()),
+      }),
+    )
+    .optional(),
   clientQuestions: z.array(
     z.object({
       relatedIssueId: z.string().nullable(),

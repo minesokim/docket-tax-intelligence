@@ -1266,6 +1266,204 @@ export function unsupportedScopeResponse(scope: string) {
   };
 }
 
+type IssuePlaybook = {
+  situationMode: string;
+  ruleSpace: string[];
+  smellTests: string[];
+  professionalJudgment: string;
+  assumptionsToAvoid: string[];
+  diligenceDuties: string[];
+  riskRationale: string;
+  reviewerChecklist: string[];
+  clearanceStandard: string;
+  clientQuestionStrategy: string;
+};
+
+const DEFAULT_ISSUE_PLAYBOOK: IssuePlaybook = {
+  situationMode: "Reviewer judgment",
+  ruleSpace: ["Client fact graph", "Evidence requirements", "Firm review policy"],
+  smellTests: ["Material issue is not fully supported yet."],
+  professionalJudgment: "Treat this as a preparer judgment item until the source file, client facts, and reviewer approval support clearance.",
+  assumptionsToAvoid: ["Do not infer missing facts from prior-year patterns.", "Do not treat AI wording as evidence."],
+  diligenceDuties: [
+    "Separate source-backed facts from client claims.",
+    "Preserve source IDs and reviewer decision history.",
+    "Escalate material uncertainty instead of clearing it silently.",
+  ],
+  riskRationale: "The issue affects a material return position or filing workflow gate.",
+  reviewerChecklist: ["Confirm source evidence.", "Confirm tax-year and jurisdiction match.", "Document reviewer judgment before clearance."],
+  clearanceStandard: "Clear only after the missing facts are documented, citations are current, and the assigned reviewer approves the position.",
+  clientQuestionStrategy: "Ask a narrow factual question that can be answered with a document, date, amount, or yes/no confirmation.",
+};
+
+const ISSUE_PLAYBOOKS: Record<string, IssuePlaybook> = {
+  INCOME_RECONCILIATION: {
+    situationMode: "Returning Schedule C client with year-over-year and third-party income mismatch",
+    ruleSpace: ["Schedule C gross receipts", "1099-NEC reporting", "1099-K processor reporting", "Prior-year comparison"],
+    smellTests: [
+      "Client used a round-number estimate.",
+      "1099-NEC plus 1099-K exceeds the client claim.",
+      "Prior-year Schedule C gross receipts create an expected pattern to compare.",
+    ],
+    professionalJudgment:
+      "Block Schedule C gross receipts until the preparer reconciles client-stated receipts to source documents and any payment-processor overlap.",
+    assumptionsToAvoid: [
+      "Do not assume the 1099-K is incremental income.",
+      "Do not assume the 1099-K duplicates the 1099-NEC without processor detail.",
+      "Do not use the client's round-number estimate as verified gross receipts.",
+    ],
+    diligenceDuties: [
+      "Tie every gross-receipts amount to a source document, client ledger, or reviewer override.",
+      "Compare current-year receipts to prior-year Schedule C patterns.",
+      "Document whether refunds, fees, or duplicate processor reporting explain the variance.",
+    ],
+    riskRationale:
+      "Gross receipts are a core Schedule C line item. A material mismatch can understate or overstate income and should block filing readiness.",
+    reviewerChecklist: [
+      "Confirm 1099-NEC Box 1 nonemployee compensation.",
+      "Confirm 1099-K gross payment amount and whether it includes Bluepeak payments.",
+      "Reconcile any additional cash/check/ACH receipts.",
+      "Approve the final Schedule C gross receipts fact.",
+    ],
+    clearanceStandard:
+      "Clear only when 1099-K/1099-NEC overlap is documented, total receipts reconcile, and the reviewer accepts the final gross receipts fact.",
+    clientQuestionStrategy:
+      "Ask whether Stripe includes payments also reported by Bluepeak, then request processor detail or bookkeeping support.",
+  },
+  FORM_1099K_OVERLAP: {
+    situationMode: "Payment-processor reconciliation",
+    ruleSpace: ["Schedule C gross receipts", "1099-K processor detail", "Payer-level income tracing"],
+    smellTests: ["Same payer may appear in processor and nonemployee compensation reporting.", "Processor gross amount may not equal taxable gross receipts workpaper."],
+    professionalJudgment: "Treat processor overlap as unresolved until the firm can map payer-level receipts to the 1099-K and 1099-NEC.",
+    assumptionsToAvoid: ["Do not double count processor receipts.", "Do not net processor fees unless the workpaper separately supports fees."],
+    diligenceDuties: ["Request transaction detail when payer overlap is possible.", "Document how gross receipts were normalized."],
+    riskRationale: "Duplicate or missing receipts can materially distort Schedule C gross income.",
+    reviewerChecklist: ["Compare payer names.", "Trace deposits or processor exports.", "Tie final receipts to the workpaper."],
+    clearanceStandard: "Clear only after overlap is resolved and gross receipts tie to accepted evidence.",
+    clientQuestionStrategy: "Ask the client to identify whether Bluepeak paid through Stripe or separately.",
+  },
+  MISSING_1099_B: {
+    situationMode: "Document-driven investment income blocker",
+    ruleSpace: ["Brokerage reporting", "Capital transactions", "Basis and holding-period substantiation"],
+    smellTests: ["Stock sale mentioned in transcript but no brokerage tax package is uploaded.", "Prior-year brokerage pattern increases expected-document confidence."],
+    professionalJudgment: "Treat the stock-sale statement as a document-triggering claim and block the investment section until brokerage support arrives.",
+    assumptionsToAvoid: [
+      "Do not infer proceeds, basis, holding period, or wash-sale adjustments from the transcript.",
+      "Do not ignore a current-year sale because the client has not uploaded a form.",
+    ],
+    diligenceDuties: [
+      "Request the 2024 consolidated 1099 or transaction statement.",
+      "Preserve the transcript as a claim source, not a verified proceeds/basis fact.",
+      "Escalate missing basis support before clearance.",
+    ],
+    riskRationale: "A missing 1099-B can omit capital transactions and create a false-ready return.",
+    reviewerChecklist: ["Identify brokerage.", "Collect consolidated 1099-B.", "Review proceeds, basis, holding period, and wash-sale indicators."],
+    clearanceStandard: "Clear only when brokerage documentation is uploaded or a reviewer records an explicit override with rationale.",
+    clientQuestionStrategy: "Ask which brokerage held the Tesla shares and request the 2024 consolidated tax package.",
+  },
+  STATE_RESIDENCY: {
+    situationMode: "Mid-year move and possible multi-state wage allocation",
+    ruleSpace: ["State residency", "Domicile facts", "Wage sourcing", "Engagement scope boundaries"],
+    smellTests: ["Move month is known but exact date is missing.", "California employer remains in the fact pattern after a Texas move claim."],
+    professionalJudgment: "Route the CA-to-TX move through residency and wage-allocation review before state filing assumptions are accepted.",
+    assumptionsToAvoid: [
+      "Do not assume the move date from the month alone.",
+      "Do not assume Texas residency eliminates California-source wage questions.",
+    ],
+    diligenceDuties: ["Collect exact move date and domicile facts.", "Confirm where services were performed after the move.", "Review state scope limits."],
+    riskRationale: "Mid-year moves can affect residency status, wage sourcing, and state filing obligations.",
+    reviewerChecklist: ["Confirm move date.", "Confirm post-move work location.", "Review CA employer wage reporting.", "Decide if state specialist review is needed."],
+    clearanceStandard: "Clear only after domicile and work-location facts are documented and reviewer signs off on state treatment.",
+    clientQuestionStrategy: "Ask for exact move date, California workdays after the move, and facts showing the Texas domicile change.",
+  },
+  HOME_OFFICE_SUBSTANTIATION: {
+    situationMode: "Deduction opportunity with personal-use ambiguity",
+    ruleSpace: ["Home office exclusive use", "Regular business use", "Schedule C substantiation"],
+    smellTests: ["Client mentioned guests using the room.", "Opportunity exists, but the same transcript weakens exclusive-use support."],
+    professionalJudgment: "Treat home office as an opportunity, not a claim, until exclusive and regular business use are confirmed.",
+    assumptionsToAvoid: ["Do not claim the deduction when personal guest use is unresolved.", "Do not estimate square footage without client support."],
+    diligenceDuties: ["Confirm exclusive use.", "Confirm regular business use.", "Collect square footage and expense support before workpaper approval."],
+    riskRationale: "The transcript itself introduces personal-use ambiguity, which weakens substantiation.",
+    reviewerChecklist: ["Confirm exclusive-use answer.", "Confirm regular-use answer.", "Review floor area and expense support.", "Approve or reject opportunity."],
+    clearanceStandard: "Clear only if exclusive and regular use are supported and the reviewer approves the opportunity.",
+    clientQuestionStrategy: "Ask whether guests or family used the office space at any time during 2024 and request dimensions only if exclusive use is confirmed.",
+  },
+  MILEAGE_SUBSTANTIATION: {
+    situationMode: "Substantiation-sensitive Schedule C deduction review",
+    ruleSpace: ["Business mileage", "Contemporaneous records", "Business purpose support", "Firm mileage policy"],
+    smellTests: ["Only Q4 support is visible.", "Mileage entries lack complete business-purpose detail."],
+    professionalJudgment: "Treat mileage as a possible deduction that needs contemporaneous business-purpose support before acceptance.",
+    assumptionsToAvoid: ["Do not extrapolate Q4 mileage to the full year.", "Do not accept miles without business purpose and trip detail."],
+    diligenceDuties: ["Request full-year mileage records.", "Confirm date, destination, miles, and business purpose.", "Tie vehicle use to Schedule C activity."],
+    riskRationale: "Mileage deductions are substantiation-sensitive and the current support lacks complete business-purpose detail.",
+    reviewerChecklist: ["Review log completeness.", "Confirm business purpose.", "Check full-year coverage.", "Approve supported mileage only."],
+    clearanceStandard: "Clear only when the mileage log is complete enough for firm policy and reviewer approval.",
+    clientQuestionStrategy: "Ask for a full-year log with date, destination, miles, and business purpose for each business trip.",
+  },
+};
+
+function sourceLabelForProfessionalAnalysis(data: DocketData, sourceId: string): string {
+  const fact = data.taxFacts.find((item) => item.id === sourceId);
+  if (fact) return `${fact.label}: ${String(fact.value)} (${fact.status.toLowerCase()}, ${Math.round(fact.confidence * 100)}% confidence)`;
+  const claim = data.clientClaims.find((item) => item.id === sourceId);
+  if (claim) return `Client claim: ${claim.statement}`;
+  const insight = data.conversationInsights.find((item) => item.id === sourceId);
+  if (insight) return `Conversation claim: ${insight.summary}`;
+  const pattern = data.priorYearPatterns.find((item) => item.id === sourceId);
+  if (pattern) return `Prior-year pattern: ${pattern.description}`;
+  const document = data.sourceDocuments.find((item) => item.id === sourceId);
+  if (document) return `Source document: ${document.fileName}`;
+  return sourceId;
+}
+
+function buildProfessionalAnalyses(
+  data: DocketData,
+  returnId: string,
+  citationIdsForIssue: (issueType: string) => string[],
+): NonNullable<AIPrepReasoningOutput["professionalAnalyses"]> {
+  const taxReturn = findReturn(data, returnId);
+  const client = data.clients.find((item) => item.id === taxReturn.clientId);
+  const issues = data.taxIssues.filter((issue) => issue.taxReturnId === returnId);
+  const questions = data.clientClarifications.filter((question) => question.taxReturnId === returnId);
+
+  return issues.map((issue) => {
+    const playbook = ISSUE_PLAYBOOKS[issue.issueType] ?? DEFAULT_ISSUE_PLAYBOOK;
+    const relatedQuestions = questions.filter((question) => question.relatedIssueId === issue.id && question.status !== "ANSWERED");
+    const establishedFacts = issue.sourceIds
+      .filter((sourceId) => data.taxFacts.some((fact) => fact.id === sourceId) || data.sourceDocuments.some((document) => document.id === sourceId))
+      .map((sourceId) => sourceLabelForProfessionalAnalysis(data, sourceId));
+    const clientClaims = issue.sourceIds
+      .filter((sourceId) => data.clientClaims.some((claim) => claim.id === sourceId) || data.conversationInsights.some((insight) => insight.id === sourceId))
+      .map((sourceId) => sourceLabelForProfessionalAnalysis(data, sourceId));
+
+    return {
+      issueId: issue.id,
+      title: issue.title,
+      situationMode: playbook.situationMode,
+      context: `${client?.displayName ?? "Client"} · ${taxReturn.taxYear} ${taxReturn.returnType} · ${taxReturn.jurisdiction}`,
+      factPatternSummary: issue.description,
+      ruleSpace: playbook.ruleSpace,
+      smellTests: playbook.smellTests,
+      professionalJudgment: playbook.professionalJudgment,
+      establishedFacts: establishedFacts.length > 0 ? establishedFacts : issue.sourceIds.map((sourceId) => sourceLabelForProfessionalAnalysis(data, sourceId)),
+      clientClaims,
+      assumptionsToAvoid: playbook.assumptionsToAvoid,
+      missingFacts: relatedQuestions.length > 0 ? relatedQuestions.map((question) => question.question) : ["Reviewer must confirm no additional facts are needed."],
+      authorityPosture:
+        citationIdsForIssue(issue.issueType).length > 0
+          ? "Citations are attached as research support; professional review still applies them to the client facts."
+          : "No specific substantive authority is attached yet; use this as workflow intelligence until authority retrieval or reviewer analysis adds support.",
+      diligenceDuties: playbook.diligenceDuties,
+      riskRationale: playbook.riskRationale,
+      reviewerChecklist: playbook.reviewerChecklist,
+      clearanceStandard: playbook.clearanceStandard,
+      clientQuestionStrategy: playbook.clientQuestionStrategy,
+      sourceIds: issue.sourceIds,
+      citationIds: citationIdsForIssue(issue.issueType),
+    };
+  });
+}
+
 function buildAIPrepReasoningOutput(data: DocketData, returnId: string): AIPrepReasoningOutput {
   const taxReturn = findReturn(data, returnId);
   const materialFacts = data.taxFacts.filter((fact) => fact.taxReturnId === returnId && fact.materiality !== "LOW");
@@ -1298,6 +1496,7 @@ function buildAIPrepReasoningOutput(data: DocketData, returnId: string): AIPrepR
         .map((question) => question.question),
       recommendedAction: issue.recommendedAction,
     })),
+    professionalAnalyses: buildProfessionalAnalyses(data, returnId, citationIdsForIssue),
     clientQuestions: questions.map((question) => ({
       relatedIssueId: question.relatedIssueId,
       question: question.question,
@@ -1363,6 +1562,7 @@ function normalizeAIPrepReasoningOutput(
     fallbackOutput.clientQuestions.map((question) => [`${question.relatedIssueId ?? "none"}:${question.question}`, question]),
   );
   const fallbackNotesByTitle = new Map(fallbackOutput.reviewerNotes.map((note) => [note.title, note]));
+  const fallbackProfessionalAnalysesByIssue = new Map((fallbackOutput.professionalAnalyses ?? []).map((analysis) => [analysis.issueId, analysis]));
 
   const issueSummaries = candidate.issueSummaries.map((issue) => {
     const fallback = fallbackIssuesById.get(issue.issueId);
@@ -1394,17 +1594,36 @@ function normalizeAIPrepReasoningOutput(
     };
   });
 
+  const professionalAnalyses = (candidate.professionalAnalyses ?? fallbackOutput.professionalAnalyses ?? []).map((analysis) => {
+    const fallback = fallbackProfessionalAnalysesByIssue.get(analysis.issueId);
+    return {
+      ...analysis,
+      ruleSpace: analysis.ruleSpace.length > 0 ? analysis.ruleSpace : fallback?.ruleSpace ?? [],
+      smellTests: analysis.smellTests.length > 0 ? analysis.smellTests : fallback?.smellTests ?? [],
+      establishedFacts: analysis.establishedFacts.length > 0 ? analysis.establishedFacts : fallback?.establishedFacts ?? [],
+      clientClaims: analysis.clientClaims.length > 0 ? analysis.clientClaims : fallback?.clientClaims ?? [],
+      assumptionsToAvoid: analysis.assumptionsToAvoid.length > 0 ? analysis.assumptionsToAvoid : fallback?.assumptionsToAvoid ?? [],
+      missingFacts: analysis.missingFacts.length > 0 ? analysis.missingFacts : fallback?.missingFacts ?? [],
+      diligenceDuties: analysis.diligenceDuties.length > 0 ? analysis.diligenceDuties : fallback?.diligenceDuties ?? [],
+      reviewerChecklist: analysis.reviewerChecklist.length > 0 ? analysis.reviewerChecklist : fallback?.reviewerChecklist ?? [],
+      sourceIds: uniqueStrings([...analysis.sourceIds, ...(fallback?.sourceIds ?? [])]),
+      citationIds: uniqueStrings([...analysis.citationIds, ...(fallback?.citationIds ?? [])]),
+    };
+  });
+
   const allCitationIds = uniqueStrings([
     ...candidate.authorityContext.citations.map((citation) => citation.citationId),
     ...fallbackOutput.authorityContext.citations.map((citation) => citation.citationId),
     ...issueSummaries.flatMap((issue) => issue.citationIds),
     ...clientQuestions.flatMap((question) => question.citationIds),
     ...reviewerNotes.flatMap((note) => note.citationIds),
+    ...professionalAnalyses.flatMap((analysis) => analysis.citationIds),
   ]);
 
   return AIPrepReasoningOutputSchema.parse({
     ...candidate,
     issueSummaries,
+    professionalAnalyses,
     clientQuestions,
     reviewerNotes,
     workpaperRefs: uniqueStrings([...candidate.workpaperRefs, ...fallbackOutput.workpaperRefs]),

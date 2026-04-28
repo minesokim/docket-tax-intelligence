@@ -17,12 +17,36 @@ export type ChatAnswer = {
   answer: string[];
   reasoningSummary: string[];
   nextSteps: string[];
+  professionalAnalyses?: ProfessionalAnalysisView[];
   sourceIds: string[];
   citationIds: string[];
   suggestedFollowups: string[];
   retrievedAuthority?: AuthorityResearchResult;
   synthesizedBy?: "claude-code-cli";
   limitation?: string;
+};
+
+export type ProfessionalAnalysisView = {
+  issueId: string;
+  title: string;
+  situationMode: string;
+  context: string;
+  factPatternSummary: string;
+  ruleSpace: string[];
+  smellTests: string[];
+  professionalJudgment: string;
+  establishedFacts: string[];
+  clientClaims: string[];
+  assumptionsToAvoid: string[];
+  missingFacts: string[];
+  authorityPosture: string;
+  diligenceDuties: string[];
+  riskRationale: string;
+  reviewerChecklist: string[];
+  clearanceStandard: string;
+  clientQuestionStrategy: string;
+  sourceIds: string[];
+  citationIds: string[];
 };
 
 export type TaxChatResponse = {

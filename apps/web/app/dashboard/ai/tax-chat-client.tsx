@@ -93,6 +93,45 @@ function AssistantAnswer({ response, animate }: { response: TaxChatResponse; ani
           </div>
         </div>
 
+        {answer.professionalAnalyses?.length ? (
+          <div className="professional-analysis-list">
+            <h3>EA-grade review frame</h3>
+            {answer.professionalAnalyses.map((analysis) => (
+              <article className="professional-analysis-card" key={analysis.issueId}>
+                <div className="item-card-title">
+                  <h4>{analysis.title}</h4>
+                  <StatusBadge label="Reviewer controlled" tone="yellow" />
+                </div>
+                <small>{analysis.situationMode}</small>
+                <p>{analysis.professionalJudgment}</p>
+                <div className="chat-answer-grid">
+                  <div>
+                    <strong>Rule space</strong>
+                    <ul>{analysis.ruleSpace.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul>
+                  </div>
+                  <div>
+                    <strong>Smell tests</strong>
+                    <ul>{analysis.smellTests.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul>
+                  </div>
+                </div>
+                <div>
+                  <strong>Assumptions to avoid</strong>
+                  <ul>{analysis.assumptionsToAvoid.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul>
+                </div>
+                <div>
+                  <strong>Clearance standard</strong>
+                  <p>{analysis.clearanceStandard}</p>
+                </div>
+                <div>
+                  <strong>Reviewer checklist</strong>
+                  <ul>{analysis.reviewerChecklist.slice(0, 4).map((item) => <li key={item}>{item}</li>)}</ul>
+                </div>
+                <SourcePills ids={[...analysis.sourceIds, ...analysis.citationIds]} sourceIndex={sourceIndex} />
+              </article>
+            ))}
+          </div>
+        ) : null}
+
         <div className="chat-citations">
           <h3>Sources cited</h3>
           {sourceIds.length > 0 ? <SourcePills ids={sourceIds} sourceIndex={sourceIndex} /> : <p>No source citation needed for this message.</p>}

@@ -285,18 +285,29 @@ describe("Docket tax intelligence engines", () => {
     expect(latestRun?.outputSchema).toBe("AIPrepReasoningOutputSchema");
     expect(latestRun?.output).toMatchObject({
       issueSummaries: expect.arrayContaining([expect.objectContaining({ issueId: "issue-income-mismatch", riskLevel: "RED" })]),
+      professionalAnalyses: expect.arrayContaining([
+        expect.objectContaining({
+          issueId: "issue-income-mismatch",
+          situationMode: expect.stringContaining("Schedule C"),
+          smellTests: expect.arrayContaining(["Client used a round-number estimate."]),
+          assumptionsToAvoid: expect.arrayContaining(["Do not assume the 1099-K is incremental income."]),
+          clearanceStandard: expect.stringContaining("gross receipts"),
+        }),
+      ]),
       reviewerNotes: expect.any(Array),
       nextAction: expect.stringContaining("reviewer approval"),
     });
     const output = latestRun?.output as {
       authorityContext: { citations: { citationId: string }[] };
       clientQuestions: { sourceIds: string[] }[];
+      professionalAnalyses: { reviewerChecklist: string[]; ruleSpace: string[]; sourceIds: string[] }[];
       reviewerNotes: { citationIds: string[] }[];
     };
     expect(output.authorityContext.citations.map((citation) => citation.citationId)).toEqual(
       expect.arrayContaining(["cite-schedule-c-gross", "cite-pub463-records", "cite-pub587-exclusive-use"]),
     );
     expect(output.clientQuestions.every((question) => question.sourceIds.length > 0)).toBe(true);
+    expect(output.professionalAnalyses.every((analysis) => analysis.reviewerChecklist.length > 0 && analysis.ruleSpace.length > 0 && analysis.sourceIds.length > 0)).toBe(true);
     expect(output.reviewerNotes.some((note) => note.citationIds.length > 0)).toBe(true);
 
     const accepted = acceptTaxFact(prep.data, "fact-nec-income", IDS.reviewer);

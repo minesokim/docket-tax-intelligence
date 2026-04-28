@@ -49,6 +49,28 @@ type ReasoningOutputView = {
     missingFacts: string[];
     recommendedAction: string;
   }[];
+  professionalAnalyses?: {
+    issueId: string;
+    title: string;
+    situationMode: string;
+    context: string;
+    factPatternSummary: string;
+    ruleSpace: string[];
+    smellTests: string[];
+    professionalJudgment: string;
+    establishedFacts: string[];
+    clientClaims: string[];
+    assumptionsToAvoid: string[];
+    missingFacts: string[];
+    authorityPosture: string;
+    diligenceDuties: string[];
+    riskRationale: string;
+    reviewerChecklist: string[];
+    clearanceStandard: string;
+    clientQuestionStrategy: string;
+    sourceIds: string[];
+    citationIds: string[];
+  }[];
   clientQuestions: { relatedIssueId: string | null; question: string; reason: string; sourceIds: string[]; citationIds: string[] }[];
   reviewerNotes: { title: string; note: string; sourceIds: string[]; citationIds: string[] }[];
   authorityContext: {
@@ -91,6 +113,10 @@ function asReasoningOutputView(output: unknown): ReasoningOutputView | null {
       Array.isArray((note as { sourceIds?: unknown }).sourceIds) &&
       Array.isArray((note as { citationIds?: unknown }).citationIds),
   );
+  const professionalAnalyses = Array.isArray((candidate as { professionalAnalyses?: unknown }).professionalAnalyses)
+    ? ((candidate as { professionalAnalyses: NonNullable<ReasoningOutputView["professionalAnalyses"]> }).professionalAnalyses)
+    : null;
+
   return {
     establishedFacts: candidate.establishedFacts as ReasoningOutputView["establishedFacts"],
     issueSummaries: candidate.issueSummaries as ReasoningOutputView["issueSummaries"],
@@ -98,6 +124,7 @@ function asReasoningOutputView(output: unknown): ReasoningOutputView | null {
     reviewerNotes,
     authorityContext,
     nextAction: candidate.nextAction,
+    ...(professionalAnalyses ? { professionalAnalyses } : {}),
   };
 }
 
@@ -232,6 +259,36 @@ export default async function ReturnWorkbenchPage({ params }: { params: Promise<
                     <p>{issue.recommendedAction}</p>
                     {issue.missingFacts.length > 0 ? <small>Missing: {issue.missingFacts.join(" · ")}</small> : null}
                     <SourcePills ids={[...issue.sourceIds, ...issue.citationIds]} sourceIndex={workbench.reasoningSourceIndex} />
+                  </div>
+                ))}
+                {latestReasoningOutput.professionalAnalyses?.slice(0, 4).map((analysis) => (
+                  <div className="item-card" key={`analysis-${analysis.issueId}`}>
+                    <div className="item-card-title">
+                      <h3>{analysis.title}</h3>
+                      <StatusBadge label="EA review frame" tone="blue" />
+                    </div>
+                    <small>{analysis.situationMode}</small>
+                    <p>{analysis.professionalJudgment}</p>
+                    <small>Clearance standard: {analysis.clearanceStandard}</small>
+                    <div className="source-rank-list">
+                      <div className="source-rank-row">
+                        <strong>Rule space</strong>
+                        <span>{analysis.ruleSpace.slice(0, 4).join(" · ")}</span>
+                      </div>
+                      <div className="source-rank-row">
+                        <strong>Smell tests</strong>
+                        <span>{analysis.smellTests.slice(0, 3).join(" · ")}</span>
+                      </div>
+                      <div className="source-rank-row">
+                        <strong>Assumptions to avoid</strong>
+                        <span>{analysis.assumptionsToAvoid.slice(0, 3).join(" · ")}</span>
+                      </div>
+                      <div className="source-rank-row">
+                        <strong>Reviewer checklist</strong>
+                        <span>{analysis.reviewerChecklist.slice(0, 4).join(" · ")}</span>
+                      </div>
+                    </div>
+                    <SourcePills ids={[...analysis.sourceIds, ...analysis.citationIds]} sourceIndex={workbench.reasoningSourceIndex} />
                   </div>
                 ))}
                 <div className="item-card">
