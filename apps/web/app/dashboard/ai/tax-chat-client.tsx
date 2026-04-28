@@ -488,16 +488,18 @@ function ThinkingBubble() {
   );
 }
 
-async function readSmokeStream(
-  question: string,
+async function readReasoningStream(
+  url: string,
+  body: Record<string, unknown>,
   onReasoning: (step: ReasoningTraceStep) => void,
+  failureLabel: string,
 ): Promise<TaxChatResponse> {
-  const res = await fetch("/api/ai/smoke", {
+  const res = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ question }),
+    headers: { accept: "text/event-stream", "content-type": "application/json" },
+    body: JSON.stringify(body),
   });
-  if (!res.ok || !res.body) throw new Error(`Smoke stream failed with status ${res.status}`);
+  if (!res.ok || !res.body) throw new Error(`${failureLabel} failed with status ${res.status}`);
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -518,12 +520,28 @@ async function readSmokeStream(
       const payload = JSON.parse(dataLine.slice("data: ".length)) as unknown;
       if (event === "reasoning") onReasoning(payload as ReasoningTraceStep);
       if (event === "response") finalResponse = payload as TaxChatResponse;
-      if (event === "error") throw new Error((payload as { message?: string }).message ?? "Smoke stream failed");
+      if (event === "error") throw new Error((payload as { message?: string }).message ?? `${failureLabel} failed`);
     }
   }
 
-  if (!finalResponse) throw new Error("Smoke stream ended without a response.");
+  if (!finalResponse) throw new Error(`${failureLabel} ended without a response.`);
   return finalResponse;
+}
+
+async function readSmokeStream(
+  question: string,
+  onReasoning: (step: ReasoningTraceStep) => void,
+): Promise<TaxChatResponse> {
+  return readReasoningStream("/api/ai/smoke", { question }, onReasoning, "Smoke stream");
+}
+
+async function readChatStream(
+  question: string,
+  returnId: string | undefined,
+  history: ChatHistoryTurn[],
+  onReasoning: (step: ReasoningTraceStep) => void,
+): Promise<TaxChatResponse> {
+  return readReasoningStream("/api/ai/chat", { question, returnId, history, stream: true }, onReasoning, "Chat stream");
 }
 
 function useTypewriter(text: string, active: boolean) {
@@ -735,14 +753,7 @@ export function TaxChatClient({ initialQuestion, initialReturnId }: { initialQue
     try {
       const response = smokeMode
         ? await readSmokeStream(questionToSend, (step) => setPendingTrace((steps) => upsertTraceStep(steps, step)))
-        : await (async () => {
-            const res = await fetch("/api/ai/chat", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ question: questionToSend, returnId: attachedReturnId, history }),
-            });
-            return (await res.json()) as TaxChatResponse;
-          })();
+        : await readChatStream(questionToSend, attachedReturnId, history, (step) => setPendingTrace((steps) => upsertTraceStep(steps, step)));
       const assistantId = `assistant-${Date.now()}`;
       setLastAssistantId(assistantId);
       setReturnId(response.contextReturnId ?? attachedReturnId);

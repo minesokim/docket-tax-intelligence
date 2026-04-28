@@ -7,6 +7,7 @@ import {
   type ChatAnswer,
   type ChatHistoryTurn,
   type ProfessionalAnalysisView,
+  type ReasoningTraceStep,
   type SourceIndexEntry,
   type TaxChatResponse,
 } from "./tax-chat-shared";
@@ -37,6 +38,37 @@ type TaxChatRoute = {
   retrievalQuestion: string;
   reason: string;
 };
+
+type TraceEmitter = (step: ReasoningTraceStep) => void;
+
+type TaxChatBuildOptions = {
+  emitTrace?: TraceEmitter;
+};
+
+function makeTraceStep(id: string, label: string, status: ReasoningTraceStep["status"], summary?: string): ReasoningTraceStep {
+  return {
+    id,
+    label,
+    status,
+    ...(summary ? { summary } : {}),
+    timestamp: new Date().toISOString(),
+  };
+}
+
+function recordTraceStep(
+  trace: ReasoningTraceStep[],
+  emit: TraceEmitter | undefined,
+  id: string,
+  label: string,
+  status: ReasoningTraceStep["status"],
+  summary?: string,
+) {
+  const step = makeTraceStep(id, label, status, summary);
+  const existingIndex = trace.findIndex((item) => item.id === id);
+  if (existingIndex >= 0) trace[existingIndex] = step;
+  else trace.push(step);
+  emit?.(step);
+}
 
 function asReasoningOutputView(output: unknown): ReasoningOutputView | null {
   if (!output || typeof output !== "object") return null;
@@ -274,6 +306,51 @@ function classifyTaxChatRoute(question: string, explicitReturnId?: string, histo
 
 function resolveWorkbench(question: string, explicitReturnId?: string, history: ChatHistoryTurn[] = []): WorkbenchView | null {
   return classifyTaxChatRoute(question, explicitReturnId, history).workbench;
+}
+
+function routeTraceSummary(route: TaxChatRoute): string {
+  if (route.scope === "client-return" && route.workbench?.client) {
+    return `Using ${route.workbench.client.displayName}'s ${route.workbench.taxReturn.taxYear} ${route.workbench.taxReturn.returnType} file.`;
+  }
+  if (route.scope === "firm-portfolio") return "Using the firm roster / portfolio path for a cross-client question.";
+  return "Using tax authority retrieval for a general research question.";
+}
+
+function retrievalTraceLabels(route: TaxChatRoute, question: string): { label: string; startSummary: string; completeSummary: string } {
+  const clientName = route.workbench?.client?.displayName ?? "the selected client";
+  if (isPersonalEmailDisclosureRequest(question) || is7216UseRestrictionRequest(question)) {
+    return {
+      label: "Drafting refusal with safe alternatives",
+      startSummary: "No client data export or marketing list is being prepared.",
+      completeSummary: "Refusal path completed without generating the requested client-data output.",
+    };
+  }
+  if (isW2Box12Lookup(question)) {
+    return {
+      label: "Reading uploaded documents",
+      startSummary: `Checking ${clientName}'s W-2 text and extracted fields for Box 12 code D.`,
+      completeSummary: "Document lookup completed from the available W-2 evidence.",
+    };
+  }
+  if (route.scope === "client-return") {
+    return {
+      label: "Reading client file",
+      startSummary: `Loading ${clientName}'s facts, documents, issues, missing documents, and review gates.`,
+      completeSummary: `${clientName}'s client-file context was loaded for the response.`,
+    };
+  }
+  if (route.scope === "firm-portfolio") {
+    return {
+      label: "Screening firm roster",
+      startSummary: "Checking roster, client-file, issue, document, and workflow signals relevant to this cross-client question.",
+      completeSummary: "Portfolio screen completed without falling back to an unrelated client memo.",
+    };
+  }
+  return {
+    label: "Pulling tax authority",
+    startSummary: "Searching official tax authority and source-backed guidance for this research question.",
+    completeSummary: "Authority retrieval completed for the research answer.",
+  };
 }
 
 function isBareClientLookup(question: string): boolean {
@@ -2205,8 +2282,16 @@ function shouldAttachClientArtifacts(question: string, answer: ChatAnswer): bool
   return (answer.professionalAnalyses?.length ?? 0) > 0;
 }
 
-export async function buildTaxChatResponse(question: string, returnId?: string, conversationHistory: ChatHistoryTurn[] = []): Promise<TaxChatResponse> {
+export async function buildTaxChatResponse(question: string, returnId?: string, conversationHistory: ChatHistoryTurn[] = [], options: TaxChatBuildOptions = {}): Promise<TaxChatResponse> {
+  const reasoningTrace: ReasoningTraceStep[] = [];
+  const trace = (id: string, label: string, status: ReasoningTraceStep["status"], summary?: string) => {
+    recordTraceStep(reasoningTrace, options.emitTrace, id, label, status, summary);
+  };
+
+  trace("scope-check", "Checking scope and compliance", "in_progress", "Deciding whether this is client-file, portfolio, research, or refusal-shaped work.");
   const route = classifyTaxChatRoute(question, returnId, conversationHistory);
+  trace("scope-check", "Checking scope and compliance", "complete", routeTraceSummary(route));
+
   const workbench = route.workbench;
   const hasClientContext = Boolean(workbench);
   const retrievalQuestion = route.retrievalQuestion;
@@ -2220,20 +2305,33 @@ export async function buildTaxChatResponse(question: string, returnId?: string, 
       detail: source.detail,
     };
   }
+
+  const retrievalTrace = retrievalTraceLabels(route, question);
+  trace("retrieval", retrievalTrace.label, "in_progress", retrievalTrace.startSummary);
   const draftAnswer = await buildGroundedAnswer(question, output, hasClientContext, workbench, retrievalQuestion);
+  trace("retrieval", retrievalTrace.label, "complete", retrievalTrace.completeSummary);
+
   sourceIndex = { ...sourceIndex, ...buildResearchSourceIndex(draftAnswer) };
   sourceIndex = { ...sourceIndex, ...buildPortfolioSourceIndex(draftAnswer) };
   if (workbench && shouldAttachClientArtifacts(question, draftAnswer)) {
+    trace("review-artifacts", "Building review artifacts", "in_progress", "Preparing issue cards, source packets, and reviewer-facing work queues.");
     draftAnswer.artifacts = runTaxChatOrchestrator({
       question,
       returnId: workbench.taxReturn.id,
       history: conversationHistory,
     });
+    trace("review-artifacts", "Building review artifacts", "complete", "Review artifacts are ready for the memo view.");
   }
+
+  trace("synthesis", "Drafting response with citations", "in_progress", "Writing the answer from the retrieved sources and visible Docket evidence.");
+  const answer = maybeSynthesizeWithClaude(question, draftAnswer, workbench, sourceIndex, conversationHistory);
+  trace("synthesis", "Drafting response with citations", "complete", "Response drafted with available citations and source callouts.");
+
   return {
-    answer: maybeSynthesizeWithClaude(question, draftAnswer, workbench, sourceIndex, conversationHistory),
+    answer,
     sourceIndex,
     contextLabel: workbench?.client ? `${workbench.client.displayName} · ${workbench.taxReturn.taxYear} ${workbench.taxReturn.returnType}` : null,
     contextReturnId: workbench?.taxReturn.id ?? null,
+    reasoningTrace,
   };
 }
