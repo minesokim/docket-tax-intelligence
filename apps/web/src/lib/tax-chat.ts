@@ -31,6 +31,13 @@ type ReasoningOutputView = {
 
 type WorkbenchView = NonNullable<ReturnType<typeof getReturnWorkbench>>;
 
+type TaxChatRoute = {
+  scope: ChatAnswer["mode"];
+  workbench: WorkbenchView | null;
+  retrievalQuestion: string;
+  reason: string;
+};
+
 function asReasoningOutputView(output: unknown): ReasoningOutputView | null {
   if (!output || typeof output !== "object") return null;
   const candidate = output as Partial<ReasoningOutputView>;
@@ -135,19 +142,57 @@ function isTopicPivotAway(question: string): boolean {
 function isPortfolioClientQuestion(question: string): boolean {
   const normalized = normalizeForMatch(question);
   const namedClientSignal = /\b(which|who|name|names|list|show|identify|screen)\b.*\b(client|clients|returns|files)\b/.test(normalized);
+  const firmWideSignal = isFirmWideHandoffQuestion(question) || isTippedOccupationClientQuestion(question);
   const workQueueSignal =
     /\bwhat do i need to work on\b|\bwhat should i work on\b|\bwhere should i focus\b|\bwho needs attention\b|\bwhat needs attention\b|\bwho'?s at risk\b|\bwho is at risk\b|\brank my open files\b|\bopen files by urgency\b/.test(normalized) ||
     (/\b(which|what|who|rank|prioritize|triage|focus|work)\b/.test(normalized) &&
       /\b(right now|today|this week|focus|work on|prioritize|triage|attention|urgency|urgent|open files)\b/.test(normalized));
   const attributeSignal =
-    /\b(everyone|anyone|who|who'?s|which|show me|pull|rank)\b.*\b(red issue|red flag|deadline|missing|8867|due diligence|6694|exposure|same employer|state withholding|similar fact|fact pattern|audit risk|urgency|resident|residency|part-year|schedule c|eitc|fbar|foreign account|foreign accounts|foreign financial|form 8938|fincen|highest income|income|upsell)\b/.test(normalized) ||
-    /\b(6694 exposure|missing 8867|form 8867|same employer|state withholding|similar fact patterns|open red issue|open red issues|missing the deadline|audit risk|highest audit risk|part-year residency|schedule c income|claiming eitc|fbar|foreign account|foreign accounts|foreign financial account|form 8938|fincen 114|highest income|upsell|cross-sell|marketing)\b/.test(normalized);
-  return namedClientSignal || workQueueSignal || attributeSignal;
+    /\b(everyone|anyone|who|who'?s|which|show me|pull|rank)\b.*\b(red issue|red flag|deadline|missing|8867|due diligence|6694|exposure|same employer|state withholding|similar fact|fact pattern|audit risk|urgency|resident|residency|part-year|schedule c|eitc|fbar|foreign account|foreign accounts|foreign financial|form 8938|fincen|highest income|income|upsell|tip|tips|tipped)\b/.test(normalized) ||
+    /\b(6694 exposure|missing 8867|form 8867|same employer|state withholding|similar fact patterns|open red issue|open red issues|missing the deadline|audit risk|highest audit risk|part-year residency|schedule c income|claiming eitc|fbar|foreign account|foreign accounts|foreign financial account|form 8938|fincen 114|highest income|upsell|cross-sell|marketing|tipped occupation|tipped occupations|tipped clients|tip deduction|qualified tips|no tax on tips)\b/.test(normalized);
+  return firmWideSignal || namedClientSignal || workQueueSignal || attributeSignal;
 }
 
 function isPortfolioComparisonQuestion(question: string): boolean {
   const normalized = normalizeForMatch(question);
-  return /\b(similar fact|fact pattern|same employer|state withholding|across the book|everyone with|anyone with|who'?s at risk|who is at risk|open red issue|missing 8867|form 8867|6694 exposure|audit risk|urgency|open files|part-year residency|schedule c income|claiming eitc|fbar|foreign account|foreign accounts|foreign financial|form 8938|fincen|highest income|upsell)\b/.test(normalized);
+  return /\b(similar fact|fact pattern|same employer|state withholding|across the book|across all clients|all clients|everyone with|anyone with|who'?s at risk|who is at risk|open red issue|missing 8867|form 8867|6694 exposure|audit risk|urgency|open files|part-year residency|schedule c income|claiming eitc|fbar|foreign account|foreign accounts|foreign financial|form 8938|fincen|highest income|upsell|tipped occupation|tipped clients|tip deduction|no tax on tips)\b/.test(normalized);
+}
+
+function isFirmWideHandoffQuestion(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  return (
+    /\b(antonio|partner|reviewer|team)\b.*\b(catch|caught|brief|update|handoff|decided|decisions)\b/.test(normalized) ||
+    /\b(catch|brief|update|handoff)\b.*\b(across all clients|all clients|across the book|across my book|firm-wide|firm wide|roster|whole book)\b/.test(normalized) ||
+    /\bwhat (we'?ve|we have) decided\b.*\b(clients|files|book|roster)\b/.test(normalized)
+  );
+}
+
+function isTippedOccupationClientQuestion(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  return /\b(tipped occupation|tipped occupations|tipped clients|tip deduction|qualified tips|no tax on tips|tips)\b/.test(normalized) && /\b(client|clients|them|roster|book|files|intake|need from)\b/.test(normalized);
+}
+
+function shouldRouteToPortfolio(question: string): boolean {
+  if (isFirmWideHandoffQuestion(question) || isTippedOccupationClientQuestion(question)) return true;
+  return isPortfolioClientQuestion(question) && (!mentionsKnownClient(question) || isPortfolioComparisonQuestion(question));
+}
+
+function isBroadClientWorkRequest(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  return (
+    /\bwhat do we need to do\b/.test(normalized) ||
+    /\bwhat should we do\b/.test(normalized) ||
+    /\bwhat'?s next\b/.test(normalized) ||
+    /\bwhat needs to happen\b/.test(normalized) ||
+    /\bwhat are the next steps\b/.test(normalized) ||
+    /\bcatch me up\b/.test(normalized) ||
+    /\bwhere (do|should) we start\b/.test(normalized)
+  );
+}
+
+function isW2Box12Lookup(question: string): boolean {
+  const normalized = normalizeForMatch(question);
+  return /\bw-?2\b/.test(normalized) && (/\bbox 12\b/.test(normalized) || /\b12d\b/.test(normalized) || /\bcode d\b/.test(normalized));
 }
 
 function shouldUseResearchTopicForPortfolio(question: string): boolean {
@@ -172,19 +217,63 @@ export function researchRetrievalQuery(question: string, history: ChatHistoryTur
   return recentTopic ? `${recentTopic}. Follow-up question: ${question}` : question;
 }
 
-function resolveWorkbench(question: string, explicitReturnId?: string, history: ChatHistoryTurn[] = []): WorkbenchView | null {
-  if (isPortfolioClientQuestion(question) && (!mentionsKnownClient(question) || isPortfolioComparisonQuestion(question))) {
-    return null;
-  }
+function resolveClientWorkbench(question: string, explicitReturnId?: string, history: ChatHistoryTurn[] = []): WorkbenchView | null {
   const directlyMentionedReturnId = resolveReturnIdFromText(question);
   if (directlyMentionedReturnId && directlyMentionedReturnId !== explicitReturnId) {
     return getReturnWorkbench(directlyMentionedReturnId) ?? null;
   }
-  if (explicitReturnId && isGeneralResearchQuestion(question) && !mentionsKnownClient(question)) {
-    return null;
-  }
   const returnId = explicitReturnId ?? resolveReturnIdFromText(question, history);
   return returnId ? getReturnWorkbench(returnId) ?? null : null;
+}
+
+function classifyTaxChatRoute(question: string, explicitReturnId?: string, history: ChatHistoryTurn[] = []): TaxChatRoute {
+  if (shouldRouteToPortfolio(question)) {
+    return {
+      scope: "firm-portfolio",
+      workbench: null,
+      retrievalQuestion: researchRetrievalQuery(question, history),
+      reason: "portfolio-scope",
+    };
+  }
+
+  if (explicitReturnId && isGeneralResearchQuestion(question) && !mentionsKnownClient(question)) {
+    return {
+      scope: "general-research",
+      workbench: null,
+      retrievalQuestion: researchRetrievalQuery(question, history),
+      reason: "research-over-loaded-client",
+    };
+  }
+
+  const workbench = resolveClientWorkbench(question, explicitReturnId, history);
+  if (workbench) {
+    return {
+      scope: "client-return",
+      workbench,
+      retrievalQuestion: question,
+      reason: "client-file",
+    };
+  }
+
+  if (isPortfolioClientQuestion(question)) {
+    return {
+      scope: "firm-portfolio",
+      workbench: null,
+      retrievalQuestion: researchRetrievalQuery(question, history),
+      reason: "portfolio-without-loaded-client",
+    };
+  }
+
+  return {
+    scope: "general-research",
+    workbench: null,
+    retrievalQuestion: researchRetrievalQuery(question, history),
+    reason: "general-research",
+  };
+}
+
+function resolveWorkbench(question: string, explicitReturnId?: string, history: ChatHistoryTurn[] = []): WorkbenchView | null {
+  return classifyTaxChatRoute(question, explicitReturnId, history).workbench;
 }
 
 function isBareClientLookup(question: string): boolean {
@@ -643,6 +732,60 @@ function buildNecSourceConfirmationAnswer(workbench: WorkbenchView | null): Chat
     sourceIds: necDocument ? [necDocument.id, "fact-nec-income", "ev-nec-box1"] : [],
     citationIds: [],
     suggestedFollowups: ["Show the Stripe 1099-K source line.", "Open Miguel's income reconciliation table.", "Draft the income clarification question."],
+  };
+}
+
+function buildW2Box12Answer(workbench: WorkbenchView | null): ChatAnswer {
+  const clientName = workbench?.client?.displayName ?? "the selected client";
+  const w2Document = workbench?.documents.find((document) => document.documentClass === "W2");
+  const w2Text = w2Document ? documentText(w2Document) : "";
+  const codeDField = w2Document ? documentField(w2Document, /\bbox\s*12.*code\s*d|code\s*d|12d/i) : null;
+  const codeDLine = extractLine(w2Text, /\bbox\s*12\b.*\bcode\s*d\b/i) ?? extractLine(w2Text, /\bcode\s*d\b.*(401|deferral|elective)/i);
+  const visibleW2Lines = w2Document
+    ? [
+        extractLine(w2Text, /^Box 1 /i),
+        extractLine(w2Text, /^Box 2 /i),
+        extractLine(w2Text, /^Box 12 /i),
+        extractLine(w2Text, /^Box 16 /i),
+        extractLine(w2Text, /^Box 17 /i),
+      ].filter((line): line is string => Boolean(line))
+    : [];
+  const fieldLabels = w2Document?.fixtureFields.map((field) => field.label).filter(Boolean) ?? [];
+  const amount = typeof codeDField === "number" ? formatMoney(codeDField) : typeof codeDField === "string" ? codeDField : moneyFromLine(codeDLine);
+  const hasCodeD = Boolean(codeDField ?? codeDLine);
+  return {
+    mode: "client-return",
+    headline: hasCodeD
+      ? `${clientName}'s W-2 includes a Box 12 code D source line.`
+      : `${clientName}'s current W-2 extraction does not expose Box 12 code D.`,
+    answer: w2Document
+      ? hasCodeD
+        ? [
+            `The source document is ${w2Document.fileName}.`,
+            `Box 12 code D source evidence: ${codeDLine ?? `extracted field value ${String(amount)}`}.`,
+            "Generally, W-2 Box 12 code D reports elective deferrals to a 401(k) cash-or-deferred arrangement. Use the source value above for the client file; do not infer employer match or Roth deferrals from code D.",
+          ]
+        : [
+            `The source document is ${w2Document.fileName}, but the current Docket evidence for that W-2 does not contain a Box 12 code D line or extracted field.`,
+            visibleW2Lines.length > 0
+              ? `Visible W-2 lines in the current text are: ${visibleW2Lines.join("; ")}. Extracted field labels are: ${fieldLabels.join(", ") || "none"}.`
+              : `Extracted field labels are: ${fieldLabels.join(", ") || "none"}. No Box 12 line is present in the current text-backed extraction.`,
+            `So the source-backed answer is: there is no Box 12D dollar amount available for ${clientName} from the current W-2 evidence. Re-run document-content extraction or inspect the PDF before using a 401(k) deferral number.`,
+            `Generally, W-2 Box 12 code D is the 401(k) elective deferral code, but that general meaning does not supply a ${clientName}-specific amount.`,
+          ]
+      : ["No W-2 document is attached to the selected client file, so Docket cannot read Box 12 code D from source evidence."],
+    reasoningSummary: [
+      "Treated this as a narrow document-content lookup, not a full client memo.",
+      "Read the selected client's W-2 document text and extracted fields for Box 12 code D.",
+      hasCodeD ? "A Box 12 code D line or field was present in source evidence." : "The current W-2 evidence has other wage fields but no Box 12 code D field, so no amount was inferred.",
+    ],
+    nextSteps: hasCodeD
+      ? ["Reconcile the code D amount with any second-employer W-2 before testing the annual elective deferral limit.", "Do not treat code D as employer match or Roth 401(k)."]
+      : ["Run the document-content retriever or inspect the original W-2 PDF for Box 12 entries.", "If a code D amount exists on the image/PDF, add it as a structured extracted field before using it in a workpaper."],
+    sourceIds: w2Document ? [w2Document.id] : [],
+    citationIds: [],
+    suggestedFollowups: ["Open the W-2 source packet.", "Show all extracted W-2 fields.", `Run ${clientName}'s wage reconciliation.`],
+    limitation: hasCodeD ? "This is a narrow W-2 source lookup, not a full wage reconciliation." : "The current evidence supports a missing-field answer, not a zero-dollar Box 12D conclusion.",
   };
 }
 
@@ -1491,6 +1634,75 @@ function buildForeignAccountExposureAnswer(): ChatAnswer {
   };
 }
 
+function buildTippedOccupationIntakeAnswer(): ChatAnswer {
+  return {
+    mode: "firm-portfolio",
+    headline: "Tipped-occupation client intake for OBBBA §70201.",
+    answer: [
+      "For tipped-occupation clients, treat this as an intake and documentation screen, not an eligibility determination. The current roster does not store a first-class tipped-occupation flag, so Docket should not name clients from this screen until occupation and tip-reporting fields exist.",
+      "For each client routed into the screen, collect the exact occupation, job title, employer or platform, industry, and a short duties description that can be mapped to the IRS tipped-occupation list once it is available. Do not rely on shorthand labels like server, stylist, valet, or driver without duties and payer context.",
+      "Pin down worker status: W-2 employee, statutory employee, Schedule C/independent contractor, owner-operator, or mixed status. Also ask whether tips were pooled, shared, allocated by the employer, paid through a platform, or reported through a point-of-sale system.",
+      "Build the tip reporting trail: W-2 Box 7 Social Security tips, W-2 Box 8 allocated tips, daily tip logs or POS reports, Form 4070/4070-A equivalents, Form 4137 history for unreported tips, 1099-NEC/1099-K support for self-employed or platform tips, and books-and-records support for any cash tips.",
+      "Also collect filing status, MAGI facts, state of residence, and state conformity notes before client-facing planning. State treatment and transition relief may differ from the federal deduction mechanics.",
+    ],
+    reasoningSummary: [
+      "This is a portfolio intake workflow because the prompt asks about tipped-occupation clients as a class.",
+      "No client is treated as eligible from roster tags alone; the missing first-class occupation and tip-reporting fields are called out directly.",
+      "The requested output is the evidence checklist the firm needs before provision-level review.",
+    ],
+    nextSteps: [
+      "Add intake fields for tipped occupation, duties, worker status, tip reporting method, W-2 Boxes 7/8, Form 4137, POS/tip log support, and platform/1099 tips.",
+      "Run a roster screen only after those fields or equivalent source documents are populated.",
+      "Keep any client outreach reviewer-controlled until the provision-level authority packet and client facts line up.",
+    ],
+    sourceIds: [],
+    citationIds: [],
+    suggestedFollowups: ["Add tipped-occupation intake fields.", "Show OBBBA client impact candidates.", "Draft a tipped-income organizer question."],
+    limitation: "No client names were returned because tipped occupation is not yet tracked as a source-backed roster field.",
+  };
+}
+
+function buildCrossClientHandoffAnswer(): ChatAnswer {
+  const focus = buildGeneralPortfolioFocusList().slice(0, 6);
+  const obbbaCandidates = buildTopicPortfolioCandidateList("OBBBA Public Law 119-21 client impact").slice(0, 6);
+  const focusNames = focus.map((candidate) => candidate.name).join(", ");
+  const obbbaNames = obbbaCandidates.map((candidate) => candidate.name).join(", ");
+  const miguel = getReturnWorkbench("return-miguel-2024");
+  const miguelOpenIssues = miguel?.issues.filter((issue) => isOpenIssue(issue)).map((issue) => issue.title).slice(0, 4) ?? [];
+  return {
+    mode: "firm-portfolio",
+    headline: "Cross-client handoff: triage and screens, not final decisions.",
+    answer: [
+      "No formal decision log is stored in this chat path. Antonio should treat the current record as triage, screening, and refusal posture, not adjudicated return positions.",
+      focus.length
+        ? `Current work queue: ${focusNames}. These are prioritized by red issues, blockers, extension risk, missing documents, readiness, and response cadence. Open each client file before drafting outreach or clearing a filing position.`
+        : "No current work-queue candidates were found in the roster.",
+      obbbaCandidates.length
+        ? `OBBBA screening candidates: ${obbbaNames}. These are provision-level review candidates, not eligibility determinations or client-facing numbers.`
+        : "No OBBBA client-impact screening candidates were found from current tags/documents.",
+      "Compliance posture established in the run: personal-email export of tax data is blocked, full SSNs are not displayed in chat, income-based upsell targeting is treated as a §7216 use problem, and Tax Court brief drafting is outside Docket/preparer scope.",
+      "FBAR screen status: no source-backed foreign-account, FinCEN 114, or Form 8938 signals were found in the roster, but the data model lacks first-class FBAR intake fields. That is a no-signal screen, not an affirmative no-FBAR conclusion.",
+      miguelOpenIssues.length
+        ? `Miguel remains unresolved on: ${miguelOpenIssues.join("; ")}. Those are open review items, not decisions.`
+        : "Miguel has no open issues in the current workbench state.",
+    ],
+    reasoningSummary: [
+      "Treated this as a firm-wide handoff because the prompt asks what was decided across all clients.",
+      "Separated formal decisions from triage, screening labels, refusal posture, and unresolved client-file work.",
+      "Used roster/workbench signals rather than appending the loaded client's issue stack.",
+    ],
+    nextSteps: [
+      "Convert any true decisions into a first-class decision log with source IDs, reviewer owner, and timestamp.",
+      "Open each HIGH work-queue client before outreach.",
+      "Add first-class FBAR and tipped-occupation intake fields before treating those screens as complete.",
+    ],
+    sourceIds: Array.from(new Set([...focus.map((candidate) => candidate.clientId), ...obbbaCandidates.map((candidate) => candidate.clientId), ...(miguel?.client ? [miguel.client.id] : [])])),
+    citationIds: [],
+    suggestedFollowups: ["Show the current work queue.", "Show OBBBA screening candidates.", "Open Miguel's unresolved items."],
+    limitation: "This is a handoff memo from available roster/workbench state, not a signed return-position decision log.",
+  };
+}
+
 type PortfolioFilterDefinition = {
   id: string;
   patterns: RegExp[];
@@ -1500,6 +1712,8 @@ type PortfolioFilterDefinition = {
 function portfolioFilterRegistry(): PortfolioFilterDefinition[] {
   return [
     { id: "section_7216_use_restriction", patterns: [], build: build7216UseRestrictionAnswer },
+    { id: "cross_client_handoff", patterns: [/catch.*up.*clients|handoff.*clients|decided.*clients|decisions.*clients|across all clients|all clients.*decided|antonio.*catch|antonio.*update|firm-wide.*handoff|firm wide.*handoff/], build: buildCrossClientHandoffAnswer },
+    { id: "tipped_occupation_intake", patterns: [/tipped occupation|tipped occupations|tipped clients|tip deduction|qualified tips|no tax on tips/], build: buildTippedOccupationIntakeAnswer },
     { id: "eitc_delta", patterns: [/\beitc\b|earned income credit|earned income tax credit/], build: buildEitcDeltaAnswer },
     { id: "foreign_account_fbar", patterns: [/\bfbar\b|foreign account|foreign accounts|foreign financial|form 8938|\b8938\b|fincen|foreign bank|signature authority/], build: () => buildForeignAccountExposureAnswer() },
     { id: "audit_risk", patterns: [/audit risk|irs scrutiny|\baudit\b/], build: buildAuditRiskAnswer },
@@ -1695,7 +1909,7 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
     return buildClientLookupAnswer(workbench);
   }
 
-  if (isDeepMemoRequest(question)) {
+  if (isDeepMemoRequest(question) || isBroadClientWorkRequest(question)) {
     return buildClientDeepDiveAnswer(workbench, output);
   }
 
@@ -1705,6 +1919,10 @@ async function buildGroundedAnswer(question: string, output: ReasoningOutputView
 
   if ((/\bconfirm\b|\bexact\b|\bsource\b|\bline\b|\bbox\b/.test(q) && /\b1099-nec|nec|nonemployee compensation|42,?000\b/.test(q)) || /\bexact line on the form\b/.test(q)) {
     return buildNecSourceConfirmationAnswer(workbench);
+  }
+
+  if (isW2Box12Lookup(question)) {
+    return buildW2Box12Answer(workbench);
   }
 
   if (/\bk-?1\b/.test(q) && /\bat-risk|at risk|basis|entering 2024/.test(q)) {
@@ -1946,7 +2164,7 @@ function maybeSynthesizeWithClaude(
     (/\bconfirm\b|\bexact\b|\bsource\b|\bline\b|\bbox\b/.test(q) && /\b1099-nec|nec|nonemployee compensation|42,?000\b/.test(q)) ||
     /\bexact line on the form\b/.test(q);
   const k1AtRiskLookup = /\bk-?1\b/.test(q) && /\b(at-risk|at risk|basis|entering 2024)\b/.test(q);
-  if (exactSourceLookup || k1AtRiskLookup || isPersonalEmailDisclosureRequest(question)) {
+  if (exactSourceLookup || isW2Box12Lookup(question) || k1AtRiskLookup || isPersonalEmailDisclosureRequest(question)) {
     return answer;
   }
   const draftAnswer = {
@@ -1983,14 +2201,15 @@ function maybeSynthesizeWithClaude(
 function shouldAttachClientArtifacts(question: string, answer: ChatAnswer): boolean {
   if (answer.mode !== "client-return") return false;
   if (isBareClientLookup(question)) return true;
-  if (isDeepMemoRequest(question)) return true;
+  if (isDeepMemoRequest(question) || isBroadClientWorkRequest(question)) return true;
   return (answer.professionalAnalyses?.length ?? 0) > 0;
 }
 
 export async function buildTaxChatResponse(question: string, returnId?: string, conversationHistory: ChatHistoryTurn[] = []): Promise<TaxChatResponse> {
-  const workbench = resolveWorkbench(question, returnId, conversationHistory);
+  const route = classifyTaxChatRoute(question, returnId, conversationHistory);
+  const workbench = route.workbench;
   const hasClientContext = Boolean(workbench);
-  const retrievalQuestion = hasClientContext ? question : researchRetrievalQuery(question, conversationHistory);
+  const retrievalQuestion = route.retrievalQuestion;
   const output = asReasoningOutputView(workbench?.latestAIReasoningRun?.output);
   let sourceIndex: Record<string, SourceIndexEntry> = {};
   for (const [id, source] of Object.entries(workbench?.reasoningSourceIndex ?? {})) {

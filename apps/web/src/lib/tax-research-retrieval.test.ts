@@ -77,6 +77,36 @@ describe("tax research authority ranking", () => {
     expect(response.sourceIndex["client-omar-haddad"]?.type).toBe("Client roster");
   }, 15_000);
 
+  it("routes firm-wide handoff questions to portfolio mode even when Miguel is loaded", async () => {
+    const response = await buildTaxChatResponse("Antonio's been gone for two weeks. Catch him up on what we've decided across all clients.", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.contextReturnId).toBeNull();
+    expect(response.answer.artifacts).toBeUndefined();
+    expect(response.answer.headline).toContain("Cross-client handoff");
+    expect(text).toContain("No formal decision log");
+    expect(text).toContain("Miguel remains unresolved");
+    expect(text).not.toContain("Issues, ranked by filing impact");
+  }, 15_000);
+
+  it("keeps tipped-occupation intake in portfolio mode instead of appending Miguel's file memo", async () => {
+    const response = await buildTaxChatResponse("Just focusing on tipped occupation clients, what do I need from them?", "return-miguel-2024", [
+      { role: "assistant", content: "OBBBA Public Law 119-21 changed several 2025 deductions and credits." },
+    ]);
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("firm-portfolio");
+    expect(response.contextReturnId).toBeNull();
+    expect(response.answer.artifacts).toBeUndefined();
+    expect(response.answer.headline).toContain("Tipped-occupation");
+    expect(text).toContain("W-2 Box 7");
+    expect(text).toContain("Form 4137");
+    expect(text).toContain("does not store a first-class tipped-occupation flag");
+    expect(text).not.toContain("Issues, ranked by filing impact");
+    expect(text).not.toContain("Freelance income does not reconcile");
+  }, 15_000);
+
   it("releases a prior research topic when the user pivots to non-topic portfolio triage", async () => {
     const query = researchRetrievalQuery("in general. non obbba but just in general what do I need to work on right now", [
       { role: "assistant", content: "OBBBA Public Law 119-21 changed several 2025 deductions and credits." },
@@ -265,6 +295,35 @@ describe("tax research authority ranking", () => {
     expect(response.answer.headline).toContain("$42,000");
     expect(text).toContain("Form 1099-NEC Box 1");
     expect(text).toContain("Nonemployee compensation: $42,000.00");
+  }, 15_000);
+
+  it("turns broad Miguel work requests into the full client work memo", async () => {
+    const response = await buildTaxChatResponse("what do we need to do for Miguel?", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("client-return");
+    expect(response.contextLabel).toContain("Miguel Sandoval");
+    expect(response.answer.headline).toContain("not ready to file");
+    expect(response.answer.artifacts).toBeDefined();
+    expect(response.answer.professionalAnalyses?.map((analysis) => analysis.title)).toContain("Freelance income does not reconcile");
+    expect(text).toContain("Freelance income does not reconcile");
+    expect(text).toContain("Missing 1099-B after stock sale mention");
+    expect(text).not.toContain("What view do you want");
+  }, 15_000);
+
+  it("answers W-2 Box 12 code D from document evidence or says the field is missing", async () => {
+    const response = await buildTaxChatResponse("from Miguel's W-2, what's in box 12 code D", "return-miguel-2024");
+    const text = response.answer.answer.join("\n");
+
+    expect(response.answer.mode).toBe("client-return");
+    expect(response.contextLabel).toContain("Miguel Sandoval");
+    expect(response.answer.artifacts).toBeUndefined();
+    expect(response.answer.professionalAnalyses).toBeUndefined();
+    expect(response.answer.headline).toContain("does not expose Box 12 code D");
+    expect(text).toContain("Acme_W2_2024.pdf");
+    expect(text).toContain("does not contain a Box 12 code D line or extracted field");
+    expect(text).toContain("Box 1 wages");
+    expect(text).not.toContain("Issues, ranked by filing impact");
   }, 15_000);
 
   it("uses the named client for K-1 at-risk lookups even when Miguel is loaded", async () => {
